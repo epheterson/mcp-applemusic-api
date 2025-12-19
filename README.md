@@ -142,7 +142,7 @@ Ask Claude things like:
 
 ---
 
-## Tools Available
+## Tools Available (22 total)
 
 ### Playlists
 
@@ -151,8 +151,6 @@ Ask Claude things like:
 | `get_library_playlists` | List all playlists with IDs and edit status |
 | `get_playlist_tracks` | Get all tracks in a playlist |
 | `create_playlist` | Create a new (editable) playlist |
-| `update_playlist` | Change name or description |
-| `delete_playlist` | Delete a playlist |
 | `copy_playlist` | Copy to a new editable playlist |
 | `add_to_playlist` | Add tracks to a playlist |
 
@@ -165,7 +163,7 @@ Ask Claude things like:
 | `get_library_songs` | List songs in your library (with limit) |
 | `search_library` | Search your library → library IDs |
 | `add_to_library` | Add catalog songs to your library |
-| `get_album_tracks` | Get all tracks from an album |
+| `get_album_tracks` | Get all tracks from an album (library or catalog) |
 | `get_recently_played` | Recent listening history |
 
 ### Catalog Search
@@ -174,11 +172,10 @@ Ask Claude things like:
 |------|-------------|
 | `search_catalog` | Search Apple Music → catalog IDs |
 | `get_song_details` | Get full details for a song by ID |
-| `get_artist_details` | Get artist info and top songs |
+| `get_artist_details` | Search for artist and get albums |
 | `get_charts` | Get Apple Music charts (songs, albums, playlists) |
 | `get_music_videos` | Search or browse music videos |
 | `get_genres` | List all available genres |
-| `get_curator_playlists` | Get playlists from Apple Music curators |
 
 ### Discovery & Personalization
 
@@ -186,9 +183,7 @@ Ask Claude things like:
 |------|-------------|
 | `get_recommendations` | Get personalized recommendations |
 | `get_heavy_rotation` | Albums/playlists you play frequently |
-| `get_stations` | Get radio stations (personal + catalog) |
-| `get_favorite_songs` | Get your favorited/loved songs |
-| `rate_song` | Love, dislike, or clear rating for a song |
+| `rate_song` | Love or dislike a song |
 
 ### Utilities
 
@@ -206,9 +201,14 @@ Playlists created in iTunes/Music app are **read-only** via API.
 
 **Workaround:** `copy_playlist` creates an editable copy.
 
-### No Direct Track Removal
+### No Playlist Deletion or Track Removal
 
-Apple's API doesn't support removing individual tracks. Create a new playlist with the tracks you want to keep.
+Apple's API doesn't support:
+- Deleting playlists
+- Removing individual tracks from playlists
+- Updating playlist names/descriptions
+
+**Workaround:** Create a new playlist with the content you want.
 
 ### Two Types of Song IDs
 

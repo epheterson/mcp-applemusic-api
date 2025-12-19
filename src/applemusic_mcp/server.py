@@ -109,11 +109,16 @@ def get_playlist_tracks(playlist_id: str) -> str:
                 headers=headers,
                 params={"limit": 100, "offset": offset},
             )
+            # 404 can mean empty playlist or end of pagination
+            if response.status_code == 404:
+                break
             response.raise_for_status()
             tracks = response.json().get("data", [])
             if not tracks:
                 break
             all_tracks.extend(tracks)
+            if len(tracks) < 100:
+                break  # Last page
             offset += 100
 
         output = []
@@ -157,88 +162,6 @@ def create_playlist(name: str, description: str = "") -> str:
 
         playlist_id = data.get("data", [{}])[0].get("id")
         return f"Created playlist '{name}' (ID: {playlist_id})"
-
-    except requests.exceptions.RequestException as e:
-        return f"API Error: {str(e)}"
-    except (FileNotFoundError, ValueError) as e:
-        return str(e)
-
-
-@mcp.tool()
-def update_playlist(playlist_id: str, name: str = "", description: str = "") -> str:
-    """
-    Update a playlist's name and/or description.
-    Only works for playlists created via API (editable=true).
-
-    Args:
-        playlist_id: The playlist ID
-        name: New name (optional)
-        description: New description (optional)
-
-    Returns: Confirmation or error message
-    """
-    try:
-        headers = get_headers()
-
-        attrs = {}
-        if name:
-            attrs["name"] = name
-        if description:
-            attrs["description"] = description
-
-        if not attrs:
-            return "Error: Provide at least a name or description to update"
-
-        body = {"attributes": attrs}
-
-        response = requests.patch(
-            f"{BASE_URL}/me/library/playlists/{playlist_id}",
-            headers=headers,
-            json=body,
-        )
-
-        if response.status_code == 204:
-            return "Successfully updated playlist"
-        elif response.status_code == 403:
-            return "Error: Cannot edit this playlist (not API-created or permission denied)"
-        else:
-            response.raise_for_status()
-            return f"Updated playlist (status: {response.status_code})"
-
-    except requests.exceptions.RequestException as e:
-        return f"API Error: {str(e)}"
-    except (FileNotFoundError, ValueError) as e:
-        return str(e)
-
-
-@mcp.tool()
-def delete_playlist(playlist_id: str) -> str:
-    """
-    Delete a playlist from your library.
-    Only works for playlists created via API (editable=true).
-
-    Args:
-        playlist_id: The playlist ID to delete
-
-    Returns: Confirmation or error message
-    """
-    try:
-        headers = get_headers()
-
-        response = requests.delete(
-            f"{BASE_URL}/me/library/playlists/{playlist_id}",
-            headers=headers,
-        )
-
-        if response.status_code == 204:
-            return f"Successfully deleted playlist {playlist_id}"
-        elif response.status_code == 403:
-            return "Error: Cannot delete this playlist (not API-created or permission denied)"
-        elif response.status_code == 404:
-            return "Error: Playlist not found"
-        else:
-            response.raise_for_status()
-            return f"Deleted playlist (status: {response.status_code})"
 
     except requests.exceptions.RequestException as e:
         return f"API Error: {str(e)}"
@@ -314,11 +237,15 @@ def copy_playlist(source_playlist_id: str, new_name: str) -> str:
                 headers=headers,
                 params={"limit": 100, "offset": offset},
             )
+            if response.status_code == 404:
+                break  # End of pagination or empty
             response.raise_for_status()
             tracks = response.json().get("data", [])
             if not tracks:
                 break
             all_tracks.extend(tracks)
+            if len(tracks) < 100:
+                break  # Last page
             offset += 100
 
         # Create new playlist
@@ -530,24 +457,30 @@ def search_catalog(query: str, types: str = "songs") -> str:
 def get_album_tracks(album_id: str) -> str:
     """
     Get all tracks from an album.
-    Use search_catalog with types='albums' to find album IDs.
+    Works with both library album IDs (l.xxx from get_library_albums)
+    and catalog album IDs (numeric from search_catalog).
 
     Args:
-        album_id: Catalog album ID
+        album_id: Library album ID (l.xxx) or catalog album ID (numeric)
 
-    Returns: List of tracks with their catalog IDs
+    Returns: List of tracks with their IDs
     """
     try:
         headers = get_headers()
 
-        response = requests.get(
-            f"{BASE_URL}/catalog/{STOREFRONT}/albums/{album_id}/tracks",
-            headers=headers,
-        )
+        # Detect if it's a library or catalog ID
+        if album_id.startswith("l."):
+            url = f"{BASE_URL}/me/library/albums/{album_id}/tracks"
+            id_type = "library"
+        else:
+            url = f"{BASE_URL}/catalog/{STOREFRONT}/albums/{album_id}/tracks"
+            id_type = "catalog"
+
+        response = requests.get(url, headers=headers)
         response.raise_for_status()
         data = response.json()
 
-        output = ["=== Album Tracks (use add_to_library with these IDs) ==="]
+        output = [f"=== Album Tracks ({id_type} IDs) ==="]
         for track in data.get("data", []):
             attrs = track.get("attributes", {})
             name = attrs.get("name", "Unknown")
@@ -555,7 +488,7 @@ def get_album_tracks(album_id: str) -> str:
             duration_ms = attrs.get("durationInMillis", 0)
             duration = f"{duration_ms // 60000}:{(duration_ms // 1000) % 60:02d}"
             track_id = track.get("id")
-            output.append(f"  {track_num}. {name} [{duration}] (catalog ID: {track_id})")
+            output.append(f"  {track_num}. {name} [{duration}] ({id_type} ID: {track_id})")
 
         return "\n".join(output) if len(output) > 1 else "No tracks found"
 
@@ -736,7 +669,6 @@ def get_heavy_rotation() -> str:
         response = requests.get(
             f"{BASE_URL}/me/history/heavy-rotation",
             headers=headers,
-            params={"limit": 20},
         )
         response.raise_for_status()
         data = response.json()
@@ -761,113 +693,43 @@ def get_heavy_rotation() -> str:
         return str(e)
 
 
-@mcp.tool()
-def get_stations() -> str:
-    """
-    Get your Apple Music radio stations.
-
-    Returns: List of your stations
-    """
-    try:
-        headers = get_headers()
-        response = requests.get(
-            f"{BASE_URL}/me/library/stations",
-            headers=headers,
-            params={"limit": 50},
-        )
-        response.raise_for_status()
-        data = response.json()
-
-        output = []
-        for station in data.get("data", []):
-            attrs = station.get("attributes", {})
-            name = attrs.get("name", "Unknown")
-            station_id = station.get("id")
-            output.append(f"{name} [ID: {station_id}]")
-
-        return "\n".join(output) if output else "No stations found"
-
-    except requests.exceptions.RequestException as e:
-        return f"API Error: {str(e)}"
-    except (FileNotFoundError, ValueError) as e:
-        return str(e)
-
-
 # ============ RATINGS ============
-
-
-@mcp.tool()
-def get_favorite_songs() -> str:
-    """
-    Get songs you've marked as favorites (loved).
-
-    Returns: List of your favorite/loved songs
-    """
-    try:
-        headers = get_headers()
-        response = requests.get(
-            f"{BASE_URL}/me/ratings/songs",
-            headers=headers,
-            params={"limit": 50},
-        )
-        response.raise_for_status()
-        data = response.json()
-
-        output = ["=== Your Favorite Songs ==="]
-        for rating in data.get("data", []):
-            attrs = rating.get("attributes", {})
-            value = attrs.get("value", 0)
-            if value > 0:  # Loved
-                # Get the song details from relationships
-                song_id = rating.get("id", "")
-                output.append(f"Loved song ID: {song_id}")
-
-        return "\n".join(output) if len(output) > 1 else "No favorite songs found"
-
-    except requests.exceptions.RequestException as e:
-        return f"API Error: {str(e)}"
-    except (FileNotFoundError, ValueError) as e:
-        return str(e)
 
 
 @mcp.tool()
 def rate_song(song_id: str, rating: str) -> str:
     """
-    Rate a song in your library (love/dislike).
+    Rate a song (love/dislike). Use catalog song IDs (from search_catalog).
 
     Args:
-        song_id: The library song ID
-        rating: 'love', 'dislike', or 'none' to remove rating
+        song_id: The catalog song ID (numeric, from search_catalog)
+        rating: 'love' or 'dislike'
 
     Returns: Confirmation or error
+
+    Note: Removing ratings (DELETE) is not supported by Apple's API.
     """
     try:
         headers = get_headers()
 
-        rating_value = {"love": 1, "dislike": -1, "none": 0}.get(rating.lower())
+        rating_value = {"love": 1, "dislike": -1}.get(rating.lower())
         if rating_value is None:
-            return "Error: rating must be 'love', 'dislike', or 'none'"
+            return "Error: rating must be 'love' or 'dislike'"
 
-        if rating_value == 0:
-            # Remove rating
-            response = requests.delete(
-                f"{BASE_URL}/me/ratings/library-songs/{song_id}",
-                headers=headers,
-            )
-        else:
-            # Set rating
-            body = {
-                "type": "ratings",
-                "attributes": {"value": rating_value}
-            }
-            response = requests.put(
-                f"{BASE_URL}/me/ratings/library-songs/{song_id}",
-                headers=headers,
-                json={"data": [body]},
-            )
+        body = {
+            "type": "rating",
+            "attributes": {"value": rating_value}
+        }
+        response = requests.put(
+            f"{BASE_URL}/me/ratings/songs/{song_id}",
+            headers=headers,
+            json=body,
+        )
 
-        if response.status_code in [200, 201, 204]:
+        if response.status_code in [200, 201]:
             return f"Successfully set rating to '{rating}' for song {song_id}"
+        elif response.status_code == 204:
+            return f"Rating already set to '{rating}'"
         else:
             response.raise_for_status()
             return f"Rating set (status: {response.status_code})"
@@ -925,48 +787,58 @@ def get_song_details(song_id: str) -> str:
 
 
 @mcp.tool()
-def get_artist_details(artist_id: str) -> str:
+def get_artist_details(artist_name: str) -> str:
     """
-    Get detailed information about an artist from the catalog.
+    Get detailed information about an artist by searching for them.
 
     Args:
-        artist_id: Catalog artist ID
+        artist_name: Artist name to search for (e.g., "Oasis", "Taylor Swift")
 
-    Returns: Artist details and top songs
+    Returns: Artist details including genres and albums
     """
     try:
         headers = get_headers()
-        response = requests.get(
-            f"{BASE_URL}/catalog/{STOREFRONT}/artists/{artist_id}",
-            headers=headers,
-            params={"include": "top-songs"},
-        )
-        response.raise_for_status()
-        data = response.json()
 
-        artists = data.get("data", [])
+        # First search for the artist
+        search_response = requests.get(
+            f"{BASE_URL}/catalog/{STOREFRONT}/search",
+            headers=headers,
+            params={"term": artist_name, "types": "artists", "limit": 1},
+        )
+        search_response.raise_for_status()
+        search_data = search_response.json()
+
+        artists = search_data.get("results", {}).get("artists", {}).get("data", [])
         if not artists:
-            return "Artist not found"
+            return f"No artist found matching '{artist_name}'"
 
         artist = artists[0]
+        artist_id = artist.get("id")
         attrs = artist.get("attributes", {})
 
         output = [
             f"Artist: {attrs.get('name', 'Unknown')}",
+            f"Artist ID: {artist_id}",
             f"Genres: {', '.join(attrs.get('genreNames', ['Unknown']))}",
         ]
 
-        # Add top songs if available
-        relationships = artist.get("relationships", {})
-        top_songs = relationships.get("top-songs", {}).get("data", [])
-
-        if top_songs:
-            output.append("\nTop Songs:")
-            for song in top_songs[:10]:
-                song_attrs = song.get("attributes", {})
-                name = song_attrs.get("name", "Unknown")
-                album = song_attrs.get("albumName", "")
-                output.append(f"  - {name}" + (f" ({album})" if album else ""))
+        # Get artist's albums
+        albums_response = requests.get(
+            f"{BASE_URL}/catalog/{STOREFRONT}/artists/{artist_id}/albums",
+            headers=headers,
+            params={"limit": 10},
+        )
+        if albums_response.status_code == 200:
+            albums_data = albums_response.json()
+            albums = albums_data.get("data", [])
+            if albums:
+                output.append("\nRecent Albums:")
+                for album in albums[:10]:
+                    album_attrs = album.get("attributes", {})
+                    name = album_attrs.get("name", "Unknown")
+                    year = album_attrs.get("releaseDate", "")[:4]
+                    album_id = album.get("id")
+                    output.append(f"  - {name} ({year}) [catalog ID: {album_id}]")
 
         return "\n".join(output)
 
@@ -1101,44 +973,6 @@ def get_genres() -> str:
             output.append(f"{name} (ID: {genre_id})")
 
         return "\n".join(output) if output else "No genres found"
-
-    except requests.exceptions.RequestException as e:
-        return f"API Error: {str(e)}"
-    except (FileNotFoundError, ValueError) as e:
-        return str(e)
-
-
-@mcp.tool()
-def get_curator_playlists(curator_id: str = "apple-music-1") -> str:
-    """
-    Get playlists from an Apple Music curator.
-
-    Args:
-        curator_id: Curator ID (default is Apple Music's main curator)
-
-    Returns: Curated playlists
-    """
-    try:
-        headers = get_headers()
-        response = requests.get(
-            f"{BASE_URL}/catalog/{STOREFRONT}/apple-curators/{curator_id}/playlists",
-            headers=headers,
-            params={"limit": 20},
-        )
-        response.raise_for_status()
-        data = response.json()
-
-        output = []
-        for playlist in data.get("data", []):
-            attrs = playlist.get("attributes", {})
-            name = attrs.get("name", "Unknown")
-            desc = attrs.get("description", {}).get("short", "")
-            playlist_id = playlist.get("id")
-            output.append(f"{name} (ID: {playlist_id})")
-            if desc:
-                output.append(f"  {desc[:100]}...")
-
-        return "\n".join(output) if output else "No playlists found"
 
     except requests.exceptions.RequestException as e:
         return f"API Error: {str(e)}"

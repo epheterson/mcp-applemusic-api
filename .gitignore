@@ -47,3 +47,4 @@ music_user_token.json
 .pytest_cache/
 .coverage
 htmlcov/
+apple-music-credentials.md

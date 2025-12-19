@@ -693,6 +693,228 @@ def get_heavy_rotation() -> str:
         return str(e)
 
 
+@mcp.tool()
+def get_recently_added() -> str:
+    """
+    Get content recently added to your library.
+
+    Returns: Recently added albums, songs, and playlists
+    """
+    try:
+        headers = get_headers()
+        response = requests.get(
+            f"{BASE_URL}/me/library/recently-added",
+            headers=headers,
+            params={"limit": 25},
+        )
+        response.raise_for_status()
+        data = response.json()
+
+        output = ["=== Recently Added to Library ==="]
+        for item in data.get("data", []):
+            attrs = item.get("attributes", {})
+            name = attrs.get("name", "Unknown")
+            artist = attrs.get("artistName", "")
+            item_type = item.get("type", "").replace("library-", "")
+            item_id = item.get("id")
+
+            if artist:
+                output.append(f"{name} - {artist} ({item_type}) [ID: {item_id}]")
+            else:
+                output.append(f"{name} ({item_type}) [ID: {item_id}]")
+
+        return "\n".join(output) if len(output) > 1 else "No recently added content"
+
+    except requests.exceptions.RequestException as e:
+        return f"API Error: {str(e)}"
+    except (FileNotFoundError, ValueError) as e:
+        return str(e)
+
+
+@mcp.tool()
+def get_recently_played_tracks() -> str:
+    """
+    Get individual tracks you've played recently (not just albums/playlists).
+
+    Returns: Recently played songs with details
+    """
+    try:
+        headers = get_headers()
+        all_tracks = []
+
+        # API limits to 10 per request, max 50 total
+        for offset in range(0, 50, 10):
+            response = requests.get(
+                f"{BASE_URL}/me/recent/played/tracks",
+                headers=headers,
+                params={"limit": 10, "offset": offset},
+            )
+            if response.status_code != 200:
+                break
+            tracks = response.json().get("data", [])
+            if not tracks:
+                break
+            all_tracks.extend(tracks)
+
+        output = ["=== Recently Played Tracks ==="]
+        for track in all_tracks:
+            attrs = track.get("attributes", {})
+            name = attrs.get("name", "Unknown")
+            artist = attrs.get("artistName", "Unknown")
+            album = attrs.get("albumName", "")
+            output.append(f"{name} - {artist}" + (f" ({album})" if album else ""))
+
+        return "\n".join(output) if len(output) > 1 else "No recently played tracks"
+
+    except requests.exceptions.RequestException as e:
+        return f"API Error: {str(e)}"
+    except (FileNotFoundError, ValueError) as e:
+        return str(e)
+
+
+@mcp.tool()
+def get_artist_top_songs(artist_name: str) -> str:
+    """
+    Get an artist's top/most popular songs.
+
+    Args:
+        artist_name: Artist name to search for
+
+    Returns: Artist's top songs with catalog IDs
+    """
+    try:
+        headers = get_headers()
+
+        # Search for artist first
+        search_response = requests.get(
+            f"{BASE_URL}/catalog/{STOREFRONT}/search",
+            headers=headers,
+            params={"term": artist_name, "types": "artists", "limit": 1},
+        )
+        search_response.raise_for_status()
+        artists = search_response.json().get("results", {}).get("artists", {}).get("data", [])
+
+        if not artists:
+            return f"No artist found matching '{artist_name}'"
+
+        artist = artists[0]
+        artist_id = artist.get("id")
+        artist_actual_name = artist.get("attributes", {}).get("name", artist_name)
+
+        # Get top songs
+        response = requests.get(
+            f"{BASE_URL}/catalog/{STOREFRONT}/artists/{artist_id}/view/top-songs",
+            headers=headers,
+        )
+        response.raise_for_status()
+        songs = response.json().get("data", [])
+
+        output = [f"=== Top Songs by {artist_actual_name} ==="]
+        for i, song in enumerate(songs, 1):
+            attrs = song.get("attributes", {})
+            name = attrs.get("name", "Unknown")
+            album = attrs.get("albumName", "")
+            song_id = song.get("id")
+            output.append(f"{i}. {name}" + (f" ({album})" if album else "") + f" [catalog ID: {song_id}]")
+
+        return "\n".join(output) if len(output) > 1 else "No top songs found"
+
+    except requests.exceptions.RequestException as e:
+        return f"API Error: {str(e)}"
+    except (FileNotFoundError, ValueError) as e:
+        return str(e)
+
+
+@mcp.tool()
+def get_similar_artists(artist_name: str) -> str:
+    """
+    Get artists similar to a given artist.
+
+    Args:
+        artist_name: Artist name to search for
+
+    Returns: List of similar artists
+    """
+    try:
+        headers = get_headers()
+
+        # Search for artist first
+        search_response = requests.get(
+            f"{BASE_URL}/catalog/{STOREFRONT}/search",
+            headers=headers,
+            params={"term": artist_name, "types": "artists", "limit": 1},
+        )
+        search_response.raise_for_status()
+        artists = search_response.json().get("results", {}).get("artists", {}).get("data", [])
+
+        if not artists:
+            return f"No artist found matching '{artist_name}'"
+
+        artist = artists[0]
+        artist_id = artist.get("id")
+        artist_actual_name = artist.get("attributes", {}).get("name", artist_name)
+
+        # Get similar artists
+        response = requests.get(
+            f"{BASE_URL}/catalog/{STOREFRONT}/artists/{artist_id}/view/similar-artists",
+            headers=headers,
+        )
+        response.raise_for_status()
+        similar = response.json().get("data", [])
+
+        output = [f"=== Artists Similar to {artist_actual_name} ==="]
+        for artist in similar:
+            attrs = artist.get("attributes", {})
+            name = attrs.get("name", "Unknown")
+            genres = ", ".join(attrs.get("genreNames", [])[:2])
+            artist_id = artist.get("id")
+            output.append(f"{name} ({genres}) [artist ID: {artist_id}]")
+
+        return "\n".join(output) if len(output) > 1 else "No similar artists found"
+
+    except requests.exceptions.RequestException as e:
+        return f"API Error: {str(e)}"
+    except (FileNotFoundError, ValueError) as e:
+        return str(e)
+
+
+@mcp.tool()
+def get_song_station(song_id: str) -> str:
+    """
+    Get the radio station based on a song. Great for discovering similar music.
+
+    Args:
+        song_id: Catalog song ID (from search_catalog)
+
+    Returns: Station info that you can reference when asking for similar music
+    """
+    try:
+        headers = get_headers()
+
+        response = requests.get(
+            f"{BASE_URL}/catalog/{STOREFRONT}/songs/{song_id}/station",
+            headers=headers,
+        )
+        response.raise_for_status()
+        data = response.json()
+
+        stations = data.get("data", [])
+        if not stations:
+            return "No station found for this song"
+
+        station = stations[0]
+        attrs = station.get("attributes", {})
+        name = attrs.get("name", "Unknown Station")
+        station_id = station.get("id")
+
+        return f"Station: {name}\nStation ID: {station_id}\n\nUse this station to discover music similar to this song."
+
+    except requests.exceptions.RequestException as e:
+        return f"API Error: {str(e)}"
+    except (FileNotFoundError, ValueError) as e:
+        return str(e)
+
+
 # ============ RATINGS ============
 
 

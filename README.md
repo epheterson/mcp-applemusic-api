@@ -1,203 +1,194 @@
 # mcp-applemusic-api
 
-An MCP (Model Context Protocol) server for managing Apple Music playlists via the official Apple Music API.
+An MCP server for managing Apple Music playlists and library via the official REST API.
 
-**Unlike AppleScript-based solutions, this actually works for adding/removing tracks from playlists.**
+**Cross-platform** · **Claude Code integration** · **Actually works for playlist editing**
 
-> **macOS only** - Playback controls require the Music app. API features work on any platform with Python.
+---
 
-## Features
+## Quick Reference
 
-- **Playlist Management**: Create, update, delete, and copy playlists
-- **Track Management**: Add tracks to playlists, add songs to library
-- **Search**: Search your library and the Apple Music catalog
-- **Playback Controls**: Play, pause, next, previous (macOS only)
-- **Smart Warnings**: Alerts when tokens are expiring within 30 days
-- **Auto Music App Launch**: Automatically opens Music app when needed
+| Task | Command |
+|------|---------|
+| Check setup status | `applemusic-mcp status` |
+| Regenerate dev token | `applemusic-mcp generate-token` |
+| Re-authorize user | `applemusic-mcp authorize` |
+| Config directory | `~/.config/applemusic-mcp/` |
 
-## Why This Exists
+---
 
-AppleScript-based Apple Music automation is broken for playlist modification in modern macOS - commands execute but silently fail to add tracks. The Apple Music REST API actually works, but requires proper authentication.
+## Table of Contents
 
-## Prerequisites
+- [Setup (~10 minutes)](#setup)
+- [Usage Examples](#usage)
+- [Available Tools](#tools-available)
+- [Limitations](#important-limitations)
+- [Troubleshooting](#troubleshooting)
+- [CLI Reference](#cli-reference)
+- [Setting Up Another Machine](#setting-up-on-another-machine)
 
-1. **Apple Developer Account** (free or paid)
-2. **macOS** with Apple Music app (for playback features)
-3. **Python 3.10+**
-4. **Active Apple Music subscription** (for user token)
+---
 
 ## Setup
 
-### 1. Create MusicKit Credentials
+**Prerequisites:**
+- Apple Developer Account (free tier works - no $99/year required)
+- Python 3.10+
+- Apple Music subscription
 
-1. Go to [Apple Developer Portal](https://developer.apple.com/account/resources/authkeys/list)
-2. Create a new **Key** with **MusicKit** enabled
-3. Download the `.p8` private key file
+### 1. Get MusicKit Credentials (~5 min)
 
-> **⚠️ IMPORTANT: You can only download the .p8 key file ONCE!**
-> Back it up immediately to a secure location (e.g., iCloud Drive, password manager).
-> If you lose it, you'll need to create a new key.
+1. Go to [Apple Developer Portal → Keys](https://developer.apple.com/account/resources/authkeys/list)
+2. Click **+** to create a new key
+3. Name it anything (e.g., "MCP Server")
+4. Check **MusicKit** and click Continue → Register
+5. **Download the .p8 file immediately**
 
-4. Note your **Key ID** (shown after creation)
-5. Note your **Team ID** (from Membership page)
+> **⚠️ You can only download this file ONCE.** Back it up now (iCloud, password manager, etc.)
 
-### 2. Install the Package
+6. Note your **Key ID** (10-character string shown on the key page)
+7. Go to [Membership](https://developer.apple.com/account/#!/membership) and note your **Team ID**
+
+### 2. Install
 
 ```bash
-# Clone the repo
 git clone https://github.com/epheterson/mcp-applemusic-api.git
 cd mcp-applemusic-api
-
-# Create virtual environment and install
 python3 -m venv venv
-source venv/bin/activate
+source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -e .
 ```
 
-> **Note:** This is an MCP "server" in name only. You don't run it manually—Claude Code launches it automatically when needed.
-
-### 3. Configure Credentials
+### 3. Configure
 
 ```bash
 # Create config directory
-mkdir -p ~/.config/applemusic-mcp
+mkdir -p ~/.config/applemusic-mcp   # Windows: mkdir %USERPROFILE%\.config\applemusic-mcp
 
-# Copy your .p8 key (back this up first!)
-cp /path/to/AuthKey_XXXXXXXX.p8 ~/.config/applemusic-mcp/
+# Copy your .p8 key
+cp ~/Downloads/AuthKey_XXXXXXXXXX.p8 ~/.config/applemusic-mcp/
+```
 
-# Create config file
-cat > ~/.config/applemusic-mcp/config.json << EOF
+Create `~/.config/applemusic-mcp/config.json`:
+
+```json
 {
   "team_id": "YOUR_TEAM_ID",
   "key_id": "YOUR_KEY_ID",
-  "private_key_path": "~/.config/applemusic-mcp/AuthKey_XXXXXXXX.p8"
+  "private_key_path": "~/.config/applemusic-mcp/AuthKey_XXXXXXXXXX.p8"
 }
-EOF
 ```
 
-### 4. Generate Developer Token
+### 4. Generate Tokens
 
 ```bash
+# Generate developer token (valid 180 days)
 applemusic-mcp generate-token
-```
 
-This creates a JWT valid for 180 days. The server will warn you when it's within 30 days of expiring.
-
-### 5. Authorize User Access
-
-```bash
+# Authorize with Apple Music (opens browser)
 applemusic-mcp authorize
 ```
 
-This opens a browser for Apple ID login. After authorizing, the Music User Token is saved automatically—no copy/paste needed.
+### 5. Add to Claude Code
 
-### 6. Configure Claude Code
-
-Add to your Claude Code MCP settings (`~/.claude.json` or project settings):
+Add to `~/.claude.json` (or project `.claude/settings.json`):
 
 ```json
 {
   "mcpServers": {
     "applemusic": {
-      "command": "/path/to/mcp-applemusic-api/venv/bin/python",
+      "command": "/full/path/to/mcp-applemusic-api/venv/bin/python",
       "args": ["-m", "applemusic_mcp"]
     }
   }
 }
 ```
 
-### 7. Check Status
+### 6. Verify
 
 ```bash
 applemusic-mcp status
 ```
 
+Should show all OK:
+```
+Developer Token: OK (178 days remaining)
+Music User Token: OK
+API Connection: OK
+```
+
+---
+
 ## Usage
 
-Once configured, Claude can:
+Ask Claude things like:
 
 ```
 "List my Apple Music playlists"
-"Create a new playlist called 'Road Trip 2024'"
-"Add 'Wonderwall' by Oasis to my workout playlist"
-"Search my library for songs by The Beatles"
-"What's currently playing?"
-"What have I listened to recently?"
+"Create a playlist called 'Road Trip 2024'"
+"Search my library for Beatles songs"
+"Add 'Here Comes the Sun' to my Road Trip playlist"
+"What have I been listening to recently?"
 ```
 
-## Important Limitations
+### Common Workflow: Add a Song to a Playlist
 
-### Playlist Editability
+1. **Search catalog**: `search_catalog("Wonderwall Oasis")`
+2. **Add to library**: `add_to_library("catalog_id_here")`
+3. **Find library ID**: `search_library("Wonderwall")`
+4. **Add to playlist**: `add_to_playlist("playlist_id", "library_song_id")`
 
-The Apple Music API can only edit playlists that were **created via the API**. Playlists created in iTunes/Music app are read-only via API.
+> **Why so many steps?** Apple's API requires songs to be in your library before adding to playlists, and uses different IDs for catalog vs library.
 
-**Workaround:** Use `api_copy_playlist` to create an API-editable copy of any playlist.
-
-### Track Removal
-
-The Apple Music API doesn't support direct track removal from playlists. To remove tracks, create a new playlist with only the tracks you want to keep.
-
-### Library IDs vs Catalog IDs
-
-- **Catalog IDs**: From `api_search_catalog` - these are global Apple Music IDs
-- **Library IDs**: From `api_get_library_songs` - these are your personal library IDs
-
-To add a song from the catalog to a playlist:
-1. First add it to your library with `api_add_to_library`
-2. Find its library ID with `api_get_library_songs`
-3. Then add to playlist with `api_add_to_playlist`
-
-### Token Expiration
-
-- **Developer Token:** Valid 180 days. You'll see warnings starting 30 days before expiration.
-- **Music User Token:** Expires periodically. Re-authorize with `applemusic-mcp authorize` if API returns 401.
-
-### macOS Only (Playback Controls)
-
-The `music_*` tools (play, pause, next, etc.) use AppleScript and only work on macOS. The `api_*` tools work on any platform.
+---
 
 ## Tools Available
 
-### Playback Controls (macOS only)
+### Playlists
 
 | Tool | Description |
 |------|-------------|
-| `music_play` | Start playback |
-| `music_pause` | Pause playback |
-| `music_next` | Next track |
-| `music_previous` | Previous track |
-| `music_current_track` | Get now playing info |
-| `music_play_playlist` | Play a playlist by name |
+| `get_library_playlists` | List all playlists with IDs and edit status |
+| `get_playlist_tracks` | Get all tracks in a playlist |
+| `create_playlist` | Create a new (editable) playlist |
+| `update_playlist` | Change name or description |
+| `delete_playlist` | Delete a playlist |
+| `copy_playlist` | Copy to a new editable playlist |
+| `add_to_playlist` | Add tracks to a playlist |
 
-### Local Library (macOS only)
-
-| Tool | Description |
-|------|-------------|
-| `music_list_playlists` | List all playlists with track counts |
-| `music_get_playlist_tracks` | Get tracks in a playlist |
-| `music_search_library` | Search local library |
-
-### API - Playlists
+### Library Browsing
 
 | Tool | Description |
 |------|-------------|
-| `api_get_library_playlists` | List playlists with IDs and editability |
-| `api_create_playlist` | Create a new playlist |
-| `api_update_playlist` | Rename or update description |
-| `api_delete_playlist` | Delete an API-created playlist |
-| `api_copy_playlist` | Copy playlist to an editable version |
-| `api_add_to_playlist` | Add tracks to a playlist |
-| `api_remove_from_playlist` | Info on removing tracks (see limitations) |
+| `get_library_albums` | List all albums in your library |
+| `get_library_artists` | List all artists in your library |
+| `get_library_songs` | List songs in your library (with limit) |
+| `search_library` | Search your library → library IDs |
+| `add_to_library` | Add catalog songs to your library |
+| `get_album_tracks` | Get all tracks from an album |
+| `get_recently_played` | Recent listening history |
 
-### API - Library & Search
+### Catalog Search
 
 | Tool | Description |
 |------|-------------|
-| `api_get_library_songs` | Search your library for songs |
-| `api_add_to_library` | Add catalog songs to your library |
-| `api_search_catalog` | Search Apple Music catalog |
-| `api_get_album_tracks` | Get all tracks from an album |
-| `api_get_recently_played` | Get recently played tracks |
+| `search_catalog` | Search Apple Music → catalog IDs |
+| `get_song_details` | Get full details for a song by ID |
+| `get_artist_details` | Get artist info and top songs |
+| `get_charts` | Get Apple Music charts (songs, albums, playlists) |
+| `get_music_videos` | Search or browse music videos |
+| `get_genres` | List all available genres |
+| `get_curator_playlists` | Get playlists from Apple Music curators |
+
+### Discovery & Personalization
+
+| Tool | Description |
+|------|-------------|
+| `get_recommendations` | Get personalized recommendations |
+| `get_heavy_rotation` | Albums/playlists you play frequently |
+| `get_stations` | Get radio stations (personal + catalog) |
+| `get_favorite_songs` | Get your favorited/loved songs |
+| `rate_song` | Love, dislike, or clear rating for a song |
 
 ### Utilities
 
@@ -205,30 +196,110 @@ The `music_*` tools (play, pause, next, etc.) use AppleScript and only work on m
 |------|-------------|
 | `check_auth_status` | Verify tokens and API connection |
 
+---
+
+## Important Limitations
+
+### Only API-Created Playlists Are Editable
+
+Playlists created in iTunes/Music app are **read-only** via API.
+
+**Workaround:** `copy_playlist` creates an editable copy.
+
+### No Direct Track Removal
+
+Apple's API doesn't support removing individual tracks. Create a new playlist with the tracks you want to keep.
+
+### Two Types of Song IDs
+
+| ID Type | Source | Use For |
+|---------|--------|---------|
+| Catalog ID | `search_catalog` | Adding to library |
+| Library ID | `search_library` | Adding to playlists |
+
+### Token Expiration
+
+| Token | Lifetime | Renewal |
+|-------|----------|---------|
+| Developer | 180 days | `applemusic-mcp generate-token` |
+| User | ~months | `applemusic-mcp authorize` |
+
+You'll see warnings 30 days before developer token expires.
+
+---
+
 ## Troubleshooting
 
-### "Music app is not running"
-The Music app needs to be open for playback controls. The server will try to launch it automatically, but if that fails, open it manually.
-
-### "Unauthorized" error
-Your Music User Token may have expired. Run `applemusic-mcp authorize` to get a new one.
+### "Unauthorized" or 401 error
+```bash
+applemusic-mcp authorize
+```
 
 ### "Cannot edit this playlist"
-The playlist wasn't created via API. Use `api_copy_playlist` to create an editable copy.
+The playlist was created in iTunes/Music, not via API. Use `copy_playlist` to make an editable copy.
 
-### Developer token expiring
-Run `applemusic-mcp generate-token` to generate a new 180-day token.
+### Token expiring warning
+```bash
+applemusic-mcp generate-token
+```
 
 ### Lost your .p8 key?
-You'll need to create a new MusicKit key in the Apple Developer Portal. Update your config.json with the new key_id and key file.
+Create a new key in Apple Developer Portal. Update `config.json` with the new `key_id` and file path.
+
+### Check everything
+```bash
+applemusic-mcp status
+```
+
+---
+
+## CLI Reference
+
+```bash
+applemusic-mcp status          # Check tokens and API connection
+applemusic-mcp generate-token  # Create new developer token (180 days)
+applemusic-mcp authorize       # Browser auth for user token
+applemusic-mcp init            # Create sample config file
+applemusic-mcp serve           # Run MCP server (usually auto-launched)
+```
+
+**Config location:** `~/.config/applemusic-mcp/`
+
+**Files:**
+- `config.json` - Your credentials
+- `AuthKey_*.p8` - Private key
+- `developer_token.json` - Generated JWT
+- `music_user_token.json` - User authorization
+
+---
 
 ## Setting Up on Another Machine
 
-1. Clone the repo and install (steps 2 above)
-2. Copy your backed-up `.p8` key file to `~/.config/applemusic-mcp/`
-3. Create config.json with the same team_id and key_id
+1. Clone and install (step 2 above)
+2. Copy your `.p8` key to `~/.config/applemusic-mcp/`
+3. Create `config.json` with same `team_id` and `key_id`
 4. Run `applemusic-mcp generate-token`
-5. Run `applemusic-mcp authorize` (you'll need to sign in again)
+5. Run `applemusic-mcp authorize` (requires browser sign-in)
+
+> **Note:** The `.p8` key and `team_id`/`key_id` are reusable. User tokens must be created per-machine.
+
+---
+
+## Development
+
+```bash
+# Install dev dependencies
+pip install -e ".[dev]"
+
+# Run tests
+pytest
+
+# Format code
+black src/ tests/
+ruff check src/ tests/
+```
+
+---
 
 ## License
 
@@ -236,8 +307,6 @@ MIT
 
 ## Credits
 
-- [FastMCP](https://github.com/jlowin/fastmcp) - The MCP server framework
-- [Apple MusicKit](https://developer.apple.com/documentation/applemusicapi) - REST API documentation
-- [Model Context Protocol](https://modelcontextprotocol.io/) - The protocol specification by Anthropic
-
-Built to solve the "AppleScript playlist editing is broken" problem after discovering existing solutions don't actually work for playlist modification.
+- [FastMCP](https://github.com/jlowin/fastmcp) - MCP server framework
+- [Apple MusicKit](https://developer.apple.com/documentation/applemusicapi) - API documentation
+- [Model Context Protocol](https://modelcontextprotocol.io/) - Protocol spec by Anthropic

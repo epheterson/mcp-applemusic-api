@@ -34,20 +34,20 @@ AppleScript-based Apple Music automation is broken for playlist modification in 
 4. Note your **Key ID** (shown after creation)
 5. Note your **Team ID** (from Membership page)
 
-### 2. Install the Server
+### 2. Install the Package
 
 ```bash
 # Clone the repo
-git clone https://github.com/YOUR_USERNAME/mcp-applemusic-api.git
+git clone https://github.com/epheterson/mcp-applemusic-api.git
 cd mcp-applemusic-api
 
-# Create virtual environment
+# Create virtual environment and install
 python3 -m venv venv
 source venv/bin/activate
-
-# Install dependencies
 pip install -e .
 ```
+
+> **Note:** This is an MCP "server" in name only. You don't run it manually—Claude Code launches it automatically when needed.
 
 ### 3. Configure Credentials
 

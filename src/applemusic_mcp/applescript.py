@@ -432,9 +432,9 @@ def remove_track_from_playlist(playlist_name: str, track_name: str, artist: Opti
 
     if artist:
         safe_artist = _escape_for_applescript(artist)
-        track_query = f'first track whose name is "{safe_track}" and artist contains "{safe_artist}"'
+        track_filter = f'whose name is "{safe_track}" and artist contains "{safe_artist}"'
     else:
-        track_query = f'first track whose name is "{safe_track}"'
+        track_filter = f'whose name is "{safe_track}"'
 
     script = f'''
     tell application "Music"
@@ -444,7 +444,7 @@ def remove_track_from_playlist(playlist_name: str, track_name: str, artist: Opti
             return "ERROR:Playlist not found: {safe_playlist}"
         end try
         try
-            set targetTrack to {track_query} of targetPlaylist
+            set targetTrack to (first track of targetPlaylist {track_filter})
         on error
             return "ERROR:Track not found in playlist: {safe_track}"
         end try
@@ -682,6 +682,43 @@ def dislike_track(track_name: str, artist: Optional[str] = None) -> tuple[bool, 
     if output.startswith("ERROR:"):
         return False, output[6:]
     return success, output
+
+
+def get_rating(track_name: str, artist: Optional[str] = None) -> tuple[bool, int]:
+    """Get track rating (0-100, where 20=1 star, 40=2 stars, etc).
+
+    Args:
+        track_name: Name of the track
+        artist: Optional artist name to disambiguate
+
+    Returns:
+        Tuple of (success, rating 0-100 or error message)
+    """
+    safe_track = _escape_for_applescript(track_name)
+
+    if artist:
+        safe_artist = _escape_for_applescript(artist)
+        track_query = f'first track of library playlist 1 whose name is "{safe_track}" and artist contains "{safe_artist}"'
+    else:
+        track_query = f'first track of library playlist 1 whose name is "{safe_track}"'
+
+    script = f'''
+    tell application "Music"
+        try
+            set targetTrack to {track_query}
+        on error
+            return "ERROR:Track not found: {safe_track}"
+        end try
+        return rating of targetTrack as integer
+    end tell
+    '''
+    success, output = run_applescript(script)
+    if output.startswith("ERROR:"):
+        return False, output[6:]
+    try:
+        return True, int(output)
+    except (ValueError, TypeError):
+        return False, f"Invalid rating value: {output}"
 
 
 def set_rating(track_name: str, rating: int, artist: Optional[str] = None) -> tuple[bool, str]:

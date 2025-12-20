@@ -2362,6 +2362,39 @@ if APPLESCRIPT_AVAILABLE:
         return f"Error: {result}"
 
     @mcp.tool()
+    def get_track_rating(track_name: str, artist: str = "") -> str:
+        """Get the star rating of a track (macOS only).
+
+        Args:
+            track_name: Name of the track
+            artist: Optional artist name to disambiguate
+
+        Returns: Rating as stars (0-5) and raw value (0-100)
+        """
+        success, rating = asc.get_rating(track_name, artist if artist else None)
+        if success:
+            stars = rating // 20
+            return f"{track_name}: {'★' * stars}{'☆' * (5 - stars)} ({rating}/100)"
+        return f"Error: {rating}"
+
+    @mcp.tool()
+    def set_track_rating(track_name: str, stars: int, artist: str = "") -> str:
+        """Set the star rating of a track (macOS only).
+
+        Args:
+            track_name: Name of the track
+            stars: Rating 0-5 stars
+            artist: Optional artist name to disambiguate
+
+        Returns: Confirmation message or error
+        """
+        rating = max(0, min(5, stars)) * 20  # Convert stars to 0-100
+        success, result = asc.set_rating(track_name, rating, artist if artist else None)
+        if success:
+            return f"Set {track_name} to {'★' * stars}{'☆' * (5 - stars)}"
+        return f"Error: {result}"
+
+    @mcp.tool()
     def reveal_in_music(track_name: str, artist: str = "") -> str:
         """Reveal a track in the Music app window (macOS only).
 

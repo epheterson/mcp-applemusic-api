@@ -10,6 +10,14 @@ from mcp.server.fastmcp import FastMCP
 
 from .auth import get_developer_token, get_user_token, get_config_dir
 
+# Max characters for track listing output
+MAX_OUTPUT_CHARS = 50000
+
+
+def truncate(s: str, max_len: int) -> str:
+    """Truncate string with ellipsis if longer than max_len."""
+    return s[:max_len] + "..." if len(s) > max_len else s
+
 
 def get_cache_dir() -> Path:
     """Get cache directory for CSV exports."""
@@ -18,14 +26,144 @@ def get_cache_dir() -> Path:
     return cache_dir
 
 
-def format_duration(ms: int) -> str:
-    """Format milliseconds as mm:ss.mmm"""
-    if not ms:
+def get_timestamp() -> str:
+    """Get timestamp for unique filenames (YYYYMMDD_HHMMSS)."""
+    return time.strftime("%Y%m%d_%H%M%S")
+
+
+def format_duration(ms: int | None) -> str:
+    """Format milliseconds as m:ss (e.g., 3:45).
+
+    Args:
+        ms: Duration in milliseconds. Returns empty string for None, 0, or negative values.
+
+    Returns:
+        Formatted duration string like "3:45" or empty string for invalid input.
+    """
+    if not ms or ms <= 0:
         return ""
-    total_seconds = ms / 1000
-    minutes = int(total_seconds // 60)
+    total_seconds = ms // 1000
+    minutes = total_seconds // 60
     seconds = total_seconds % 60
-    return f"{minutes:02d}:{seconds:06.3f}"
+    return f"{minutes}:{seconds:02d}"
+
+
+def extract_track_data(track: dict, include_extras: bool = False) -> dict:
+    """Extract track data from API response into standardized dict.
+
+    Args:
+        track: Raw track dict from Apple Music API response.
+        include_extras: If True, include additional metadata (track_number, artwork, etc.)
+
+    Returns:
+        Dict with standardized keys: name, duration, artist, album, year, genre, id.
+        If include_extras=True, also includes: track_number, disc_number, has_lyrics,
+        catalog_id, composer, isrc, is_explicit, preview_url, artwork_url.
+    """
+    attrs = track.get("attributes", {})
+    play_params = attrs.get("playParams", {})
+    genres = attrs.get("genreNames", [])
+    release_date = attrs.get("releaseDate", "") or ""
+
+    data = {
+        "name": attrs.get("name", ""),
+        "duration": format_duration(attrs.get("durationInMillis", 0)),
+        "artist": attrs.get("artistName", ""),
+        "album": attrs.get("albumName", ""),
+        "year": release_date[:4] if release_date else "",
+        "genre": genres[0] if genres else "",
+        "id": track.get("id", ""),
+    }
+
+    if include_extras:
+        previews = attrs.get("previews", [])
+        data.update({
+            "track_number": attrs.get("trackNumber", ""),
+            "disc_number": attrs.get("discNumber", ""),
+            "has_lyrics": attrs.get("hasLyrics", False),
+            "catalog_id": play_params.get("catalogId", ""),
+            "composer": attrs.get("composerName", ""),
+            "isrc": attrs.get("isrc", ""),
+            "is_explicit": attrs.get("contentRating") == "explicit",
+            "preview_url": previews[0].get("url", "") if previews else "",
+            "artwork_url": attrs.get("artwork", {}).get("url", "").replace("{w}x{h}", "500x500"),
+        })
+
+    return data
+
+
+def write_tracks_csv(track_data: list[dict], csv_path: Path, include_extras: bool = False) -> None:
+    """Write track data to CSV file.
+
+    Args:
+        track_data: List of track dicts from extract_track_data().
+        csv_path: Path to write CSV file.
+        include_extras: If True, include additional metadata columns.
+    """
+    csv_fields = ["name", "duration", "artist", "album", "year", "genre", "id"]
+    if include_extras:
+        csv_fields += ["track_number", "disc_number", "has_lyrics", "catalog_id",
+                       "composer", "isrc", "is_explicit", "preview_url", "artwork_url"]
+
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=csv_fields, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(track_data)
+
+
+def _format_full(t: dict) -> str:
+    """Full format: Name - Artist (duration) Album [Year] Genre id"""
+    year_str = f" [{t['year']}]" if t["year"] else ""
+    genre_str = f" {t['genre']}" if t["genre"] else ""
+    return f"{t['name']} - {t['artist']} ({t['duration']}) {t['album']}{year_str}{genre_str} {t['id']}"
+
+
+def _format_compact(t: dict) -> str:
+    """Compact format: Name - Artist (duration) id"""
+    return f"{truncate(t['name'], 40)} - {truncate(t['artist'], 25)} ({t['duration']}) {t['id']}"
+
+
+def _format_minimal(t: dict) -> str:
+    """Minimal format: Name - Artist id"""
+    return f"{truncate(t['name'], 30)} - {truncate(t['artist'], 20)} {t['id']}"
+
+
+def format_track_list(track_data: list[dict]) -> list[str]:
+    """Format track list with tiered display based on output size.
+
+    Automatically selects the most detailed format that fits within MAX_OUTPUT_CHARS:
+    - Full: Name - Artist (duration) Album [Year] Genre id
+    - Compact: Truncated Name - Artist (duration) id
+    - Minimal: Truncated Name - Artist id
+
+    The character count includes newline characters between lines to accurately
+    estimate the final output size.
+
+    Args:
+        track_data: List of track dicts from extract_track_data().
+
+    Returns:
+        List of formatted strings, one per track.
+    """
+    if not track_data:
+        return []
+
+    # Try full format first
+    # Include newline overhead: each line except the last adds 1 char for \n
+    full_output = [_format_full(t) for t in track_data]
+    full_char_count = sum(len(line) for line in full_output) + max(0, len(full_output) - 1)
+    if full_char_count <= MAX_OUTPUT_CHARS:
+        return full_output
+
+    # Fall back to compact
+    compact_output = [_format_compact(t) for t in track_data]
+    compact_char_count = sum(len(line) for line in compact_output) + max(0, len(compact_output) - 1)
+    if compact_char_count <= MAX_OUTPUT_CHARS:
+        return compact_output
+
+    # Fall back to minimal
+    return [_format_minimal(t) for t in track_data]
+
 
 BASE_URL = "https://api.music.apple.com/v1"
 STOREFRONT = "us"
@@ -152,12 +290,13 @@ def get_library_playlists() -> str:
 
 
 @mcp.tool()
-def get_playlist_tracks(playlist_id: str) -> str:
+def get_playlist_tracks(playlist_id: str, include_extras: bool = False) -> str:
     """
     Get all tracks in a playlist.
 
     Args:
         playlist_id: The playlist ID (get from get_library_playlists)
+        include_extras: Include extra metadata in CSV (track/disc numbers, artwork, etc.)
 
     Returns: Track count, CSV file path, and track listing (tiered based on size)
     """
@@ -187,63 +326,17 @@ def get_playlist_tracks(playlist_id: str) -> str:
         if not all_tracks:
             return "Playlist is empty"
 
-        # Extract full track data
-        track_data = []
-        for track in all_tracks:
-            attrs = track.get("attributes", {})
-            play_params = attrs.get("playParams", {})
-            genres = attrs.get("genreNames", [])
+        # Extract track data using helper
+        track_data = [extract_track_data(t, include_extras) for t in all_tracks]
 
-            track_data.append({
-                "id": track.get("id", ""),
-                "catalog_id": play_params.get("catalogId", ""),
-                "name": attrs.get("name", ""),
-                "artist": attrs.get("artistName", ""),
-                "album": attrs.get("albumName", ""),
-                "duration_ms": attrs.get("durationInMillis", 0),
-                "duration": format_duration(attrs.get("durationInMillis", 0)),
-                "track_number": attrs.get("trackNumber", ""),
-                "disc_number": attrs.get("discNumber", ""),
-                "genre": genres[0] if genres else "",
-                "genres": ", ".join(genres),
-                "release_date": attrs.get("releaseDate", ""),
-                "has_lyrics": attrs.get("hasLyrics", False),
-                "artwork_url": attrs.get("artwork", {}).get("url", "").replace("{w}x{h}", "500x500"),
-            })
-
-        # Always write CSV with full data
+        # Write CSV using helper
         csv_path = get_cache_dir() / f"playlist_{playlist_id.replace('.', '_')}.csv"
-        csv_fields = ["name", "duration", "artist", "album", "track_number", "disc_number",
-                      "release_date", "genre", "genres", "has_lyrics", "id", "catalog_id", "artwork_url"]
+        write_tracks_csv(track_data, csv_path, include_extras)
 
-        with open(csv_path, "w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=csv_fields, extrasaction="ignore")
-            writer.writeheader()
-            writer.writerows(track_data)
-
-        # Build output with count header
+        # Build output
         count = len(track_data)
         output = [f"=== {count} tracks ===", f"Full data: {csv_path}", ""]
-
-        # Tiered display based on track count
-        if count <= 120:
-            # Full format: Name (duration) - Artist | Album [Year] Genre
-            for t in track_data:
-                year = t["release_date"][:4] if t["release_date"] else ""
-                year_str = f" [{year}]" if year else ""
-                genre_str = f" {t['genre']}" if t["genre"] else ""
-                output.append(f"{t['name']} ({t['duration']}) - {t['artist']} | {t['album']}{year_str}{genre_str} (ID: {t['id']})")
-        elif count <= 350:
-            # Compact: Name - Artist (ID)
-            for t in track_data:
-                name = t["name"][:45] + "..." if len(t["name"]) > 45 else t["name"]
-                artist = t["artist"][:25] + "..." if len(t["artist"]) > 25 else t["artist"]
-                output.append(f"{name} - {artist} ({t['id']})")
-        else:
-            # Minimal: truncated name + ID only
-            for t in track_data:
-                name = t["name"][:30] + "..." if len(t["name"]) > 30 else t["name"]
-                output.append(f"{name} {t['id']}")
+        output.extend(format_track_list(track_data))
 
         return "\n".join(output)
 
@@ -395,13 +488,14 @@ def copy_playlist(source_playlist_id: str, new_name: str) -> str:
 
 
 @mcp.tool()
-def search_library(query: str, limit: int = 25) -> str:
+def search_library(query: str, limit: int = 25, include_extras: bool = False) -> str:
     """
     Search your personal Apple Music library for songs.
 
     Args:
         query: Search term
         limit: Max results to return (default 25)
+        include_extras: Include extra metadata in CSV (track/disc numbers, artwork, etc.)
 
     Returns: Songs from your library with library IDs (these can be added to playlists)
     """
@@ -421,50 +515,18 @@ def search_library(query: str, limit: int = 25) -> str:
         if not songs:
             return "No songs found"
 
-        # Extract full song data
-        song_data = []
-        for song in songs:
-            attrs = song.get("attributes", {})
-            play_params = attrs.get("playParams", {})
-            genres = attrs.get("genreNames", [])
+        # Extract song data using helper
+        song_data = [extract_track_data(s, include_extras) for s in songs]
 
-            song_data.append({
-                "id": song.get("id", ""),
-                "catalog_id": play_params.get("catalogId", ""),
-                "name": attrs.get("name", ""),
-                "artist": attrs.get("artistName", ""),
-                "album": attrs.get("albumName", ""),
-                "duration_ms": attrs.get("durationInMillis", 0),
-                "duration": format_duration(attrs.get("durationInMillis", 0)),
-                "track_number": attrs.get("trackNumber", ""),
-                "disc_number": attrs.get("discNumber", ""),
-                "genre": genres[0] if genres else "",
-                "genres": ", ".join(genres),
-                "release_date": attrs.get("releaseDate", ""),
-                "has_lyrics": attrs.get("hasLyrics", False),
-                "artwork_url": attrs.get("artwork", {}).get("url", "").replace("{w}x{h}", "500x500"),
-            })
-
-        # Write CSV with full data
+        # Write CSV (timestamped to avoid overwrites)
         safe_query = "".join(c if c.isalnum() else "_" for c in query)[:30]
-        csv_path = get_cache_dir() / f"search_library_{safe_query}.csv"
-        csv_fields = ["name", "duration", "artist", "album", "track_number", "disc_number",
-                      "release_date", "genre", "genres", "has_lyrics", "id", "catalog_id", "artwork_url"]
-
-        with open(csv_path, "w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=csv_fields)
-            writer.writeheader()
-            writer.writerows(song_data)
+        csv_path = get_cache_dir() / f"search_library_{safe_query}_{get_timestamp()}.csv"
+        write_tracks_csv(song_data, csv_path, include_extras)
 
         # Build output
         count = len(song_data)
         output = [f"=== {count} results for '{query}' ===", f"Full data: {csv_path}", ""]
-
-        # Display with full metadata (search results are always small)
-        for s in song_data:
-            year = s["release_date"][:4] if s["release_date"] else ""
-            year_str = f" [{year}]" if year else ""
-            output.append(f"{s['name']} ({s['duration']}) - {s['artist']} | {s['album']}{year_str} [library ID: {s['id']}]")
+        output.extend(format_track_list(song_data))
 
         return "\n".join(output)
 
@@ -513,14 +575,15 @@ def add_to_library(catalog_ids: str) -> str:
 
 
 @mcp.tool()
-def get_recently_played(limit: int = 30) -> str:
+def get_recently_played(limit: int = 30, include_extras: bool = False) -> str:
     """
     Get recently played tracks from your Apple Music history.
 
     Args:
         limit: Number of tracks to return (default 30, max 50)
+        include_extras: Include extra metadata in CSV (track/disc numbers, artwork, etc.)
 
-    Returns: Recently played tracks with full metadata and CSV export
+    Returns: Recently played tracks with CSV export
     """
     try:
         headers = get_headers()
@@ -545,57 +608,17 @@ def get_recently_played(limit: int = 30) -> str:
         if not all_tracks:
             return "No recently played tracks"
 
-        # Extract full track data
-        track_data = []
-        for track in all_tracks:
-            attrs = track.get("attributes", {})
-            genres = attrs.get("genreNames", [])
-            previews = attrs.get("previews", [])
-            preview_url = previews[0].get("url", "") if previews else ""
+        # Extract track data using helper
+        track_data = [extract_track_data(t, include_extras) for t in all_tracks]
 
-            track_data.append({
-                "id": track.get("id", ""),
-                "name": attrs.get("name", ""),
-                "artist": attrs.get("artistName", ""),
-                "album": attrs.get("albumName", ""),
-                "composer": attrs.get("composerName", ""),
-                "duration_ms": attrs.get("durationInMillis", 0),
-                "duration": format_duration(attrs.get("durationInMillis", 0)),
-                "track_number": attrs.get("trackNumber", ""),
-                "disc_number": attrs.get("discNumber", ""),
-                "genre": genres[0] if genres else "",
-                "genres": ", ".join(genres),
-                "release_date": attrs.get("releaseDate", ""),
-                "isrc": attrs.get("isrc", ""),
-                "is_apple_digital_master": attrs.get("isAppleDigitalMaster", False),
-                "has_lyrics": attrs.get("hasLyrics", False),
-                "content_rating": attrs.get("contentRating", ""),
-                "url": attrs.get("url", ""),
-                "preview_url": preview_url,
-                "artwork_url": attrs.get("artwork", {}).get("url", "").replace("{w}x{h}", "500x500"),
-            })
-
-        # Write CSV with full data
+        # Write CSV using helper
         csv_path = get_cache_dir() / "recently_played.csv"
-        csv_fields = ["name", "duration", "artist", "album", "composer", "track_number", "disc_number",
-                      "release_date", "genre", "genres", "isrc", "is_apple_digital_master", "has_lyrics",
-                      "content_rating", "id", "url", "preview_url", "artwork_url"]
-
-        with open(csv_path, "w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=csv_fields)
-            writer.writeheader()
-            writer.writerows(track_data)
+        write_tracks_csv(track_data, csv_path, include_extras)
 
         # Build output
         count = len(track_data)
         output = [f"=== {count} recently played tracks ===", f"Full data: {csv_path}", ""]
-
-        # Display with metadata
-        for t in track_data:
-            year = t["release_date"][:4] if t["release_date"] else ""
-            year_str = f" [{year}]" if year else ""
-            composer_str = f" (by {t['composer']})" if t["composer"] else ""
-            output.append(f"{t['name']} ({t['duration']}) - {t['artist']} | {t['album']}{year_str}{composer_str}")
+        output.extend(format_track_list(track_data))
 
         return "\n".join(output)
 
@@ -609,7 +632,7 @@ def get_recently_played(limit: int = 30) -> str:
 
 
 @mcp.tool()
-def search_catalog(query: str, types: str = "songs", limit: int = 15) -> str:
+def search_catalog(query: str, types: str = "songs", limit: int = 15, include_extras: bool = False) -> str:
     """
     Search the Apple Music catalog.
 
@@ -617,8 +640,9 @@ def search_catalog(query: str, types: str = "songs", limit: int = 15) -> str:
         query: Search term
         types: Comma-separated types (songs, albums, artists, playlists)
         limit: Max results per type (default 15)
+        include_extras: Include extra metadata in CSV (track/disc numbers, artwork, etc.)
 
-    Returns: Search results with catalog IDs and full metadata (use add_to_library to add songs to your library first)
+    Returns: Search results with catalog IDs (use add_to_library to add songs to your library first)
     """
     try:
         headers = get_headers()
@@ -636,58 +660,25 @@ def search_catalog(query: str, types: str = "songs", limit: int = 15) -> str:
         if "songs" in results:
             songs = results["songs"].get("data", [])
 
-            # Extract full song data
-            song_data = []
-            for song in songs:
-                attrs = song.get("attributes", {})
-                genres = attrs.get("genreNames", [])
-                previews = attrs.get("previews", [])
-                preview_url = previews[0].get("url", "") if previews else ""
+            # Always extract extras for display ([E] markers) - CSV respects include_extras param
+            song_data = [extract_track_data(s, include_extras=True) for s in songs]
 
-                song_data.append({
-                    "id": song.get("id", ""),
-                    "name": attrs.get("name", ""),
-                    "artist": attrs.get("artistName", ""),
-                    "album": attrs.get("albumName", ""),
-                    "composer": attrs.get("composerName", ""),
-                    "duration_ms": attrs.get("durationInMillis", 0),
-                    "duration": format_duration(attrs.get("durationInMillis", 0)),
-                    "track_number": attrs.get("trackNumber", ""),
-                    "disc_number": attrs.get("discNumber", ""),
-                    "genre": genres[0] if genres else "",
-                    "genres": ", ".join(genres),
-                    "release_date": attrs.get("releaseDate", ""),
-                    "isrc": attrs.get("isrc", ""),
-                    "is_explicit": attrs.get("contentRating") == "explicit",
-                    "is_apple_digital_master": attrs.get("isAppleDigitalMaster", False),
-                    "has_lyrics": attrs.get("hasLyrics", False),
-                    "url": attrs.get("url", ""),
-                    "preview_url": preview_url,
-                    "artwork_url": attrs.get("artwork", {}).get("url", "").replace("{w}x{h}", "500x500"),
-                })
-
-            # Write CSV with full data
             if song_data:
+                # Write CSV (timestamped to avoid overwrites)
                 safe_query = "".join(c if c.isalnum() else "_" for c in query)[:30]
-                csv_path = get_cache_dir() / f"search_catalog_{safe_query}.csv"
-                csv_fields = ["name", "duration", "artist", "album", "composer", "track_number", "disc_number",
-                              "release_date", "genre", "genres", "isrc", "is_explicit", "is_apple_digital_master",
-                              "has_lyrics", "id", "url", "preview_url", "artwork_url"]
-
-                with open(csv_path, "w", newline="", encoding="utf-8") as f:
-                    writer = csv.DictWriter(f, fieldnames=csv_fields)
-                    writer.writeheader()
-                    writer.writerows(song_data)
+                csv_path = get_cache_dir() / f"search_catalog_{safe_query}_{get_timestamp()}.csv"
+                write_tracks_csv(song_data, csv_path, include_extras)
 
                 output.append(f"=== {len(song_data)} Songs (use add_to_library with these IDs) ===")
                 output.append(f"Full data: {csv_path}")
                 output.append("")
 
+                # Display with explicit markers: Name - Artist (duration) Album [Year] Genre [E] id
                 for s in song_data:
-                    year = s["release_date"][:4] if s["release_date"] else ""
-                    year_str = f" [{year}]" if year else ""
-                    explicit_str = " [E]" if s["is_explicit"] else ""
-                    output.append(f"  {s['name']} ({s['duration']}) - {s['artist']} | {s['album']}{year_str}{explicit_str} [catalog ID: {s['id']}]")
+                    year_str = f" [{s['year']}]" if s["year"] else ""
+                    genre_str = f" {s['genre']}" if s["genre"] else ""
+                    explicit_str = " [E]" if s.get("is_explicit") else ""
+                    output.append(f"{s['name']} - {s['artist']} ({s['duration']}) {s['album']}{year_str}{genre_str}{explicit_str} {s['id']}")
 
         if "albums" in results:
             albums = results["albums"].get("data", [])
@@ -736,7 +727,7 @@ def search_catalog(query: str, types: str = "songs", limit: int = 15) -> str:
 
 
 @mcp.tool()
-def get_album_tracks(album_id: str) -> str:
+def get_album_tracks(album_id: str, include_extras: bool = False) -> str:
     """
     Get all tracks from an album.
     Works with both library album IDs (l.xxx from get_library_albums)
@@ -744,35 +735,69 @@ def get_album_tracks(album_id: str) -> str:
 
     Args:
         album_id: Library album ID (l.xxx) or catalog album ID (numeric)
+        include_extras: Include extra metadata in CSV (composer, artwork, etc.)
 
-    Returns: List of tracks with their IDs
+    Returns: Track count, CSV file path, and track listing
     """
     try:
         headers = get_headers()
 
         # Detect if it's a library or catalog ID
         if album_id.startswith("l."):
-            url = f"{BASE_URL}/me/library/albums/{album_id}/tracks"
+            base_url = f"{BASE_URL}/me/library/albums/{album_id}/tracks"
             id_type = "library"
         else:
-            url = f"{BASE_URL}/catalog/{STOREFRONT}/albums/{album_id}/tracks"
+            base_url = f"{BASE_URL}/catalog/{STOREFRONT}/albums/{album_id}/tracks"
             id_type = "catalog"
 
-        response = requests.get(url, headers=headers)
-        response.raise_for_status()
-        data = response.json()
+        # Paginate to handle box sets / compilations with 100+ tracks
+        all_tracks = []
+        offset = 0
 
-        output = [f"=== Album Tracks ({id_type} IDs) ==="]
-        for track in data.get("data", []):
-            attrs = track.get("attributes", {})
-            name = attrs.get("name", "Unknown")
-            track_num = attrs.get("trackNumber", "?")
-            duration_ms = attrs.get("durationInMillis", 0)
-            duration = f"{duration_ms // 60000}:{(duration_ms // 1000) % 60:02d}"
-            track_id = track.get("id")
-            output.append(f"  {track_num}. {name} [{duration}] ({id_type} ID: {track_id})")
+        while True:
+            response = requests.get(
+                base_url,
+                headers=headers,
+                params={"limit": 100, "offset": offset},
+            )
+            if response.status_code == 404:
+                break
+            response.raise_for_status()
+            tracks = response.json().get("data", [])
+            if not tracks:
+                break
+            all_tracks.extend(tracks)
+            if len(tracks) < 100:
+                break
+            offset += 100
 
-        return "\n".join(output) if len(output) > 1 else "No tracks found"
+        if not all_tracks:
+            return "No tracks found"
+
+        # Always extract extras for display (track numbers, [E] markers) - CSV respects include_extras param
+        track_data = [extract_track_data(t, include_extras=True) for t in all_tracks]
+
+        # Write CSV
+        safe_id = album_id.replace(".", "_")
+        csv_path = get_cache_dir() / f"album_{safe_id}.csv"
+        write_tracks_csv(track_data, csv_path, include_extras)
+
+        # Build output - album tracks use numbered format
+        count = len(track_data)
+        output = [f"=== {count} tracks ({id_type} IDs) ===", f"Full data: {csv_path}", ""]
+
+        for t in track_data:
+            track_num = t.get("track_number", "")
+            disc_num = t.get("disc_number")
+            # Show disc prefix only for multi-disc albums (disc > 1)
+            # Handle both int and empty string cases
+            disc_str = f"{disc_num}-" if disc_num and isinstance(disc_num, int) and disc_num > 1 else ""
+            explicit_str = " [E]" if t.get("is_explicit") else ""
+            year_str = f" [{t['year']}]" if t["year"] else ""
+            # Format: 1. Name - Artist (duration) [Year] Genre [E] id
+            output.append(f"{disc_str}{track_num}. {t['name']} - {t['artist']} ({t['duration']}){year_str} {t['genre']}{explicit_str} {t['id']}")
+
+        return "\n".join(output)
 
     except requests.exceptions.RequestException as e:
         return f"API Error: {str(e)}"
@@ -851,12 +876,13 @@ def get_library_albums() -> str:
             for a in album_data:
                 year = a["release_date"][:4] if a["release_date"] else ""
                 year_str = f" [{year}]" if year else ""
-                output.append(f"{a['name']} - {a['artist']} ({a['track_count']} tracks){year_str} [ID: {a['id']}]")
+                genre_str = f" {a['genre']}" if a["genre"] else ""
+                output.append(f"{a['name']} - {a['artist']} ({a['track_count']} tracks) {year_str}{genre_str} {a['id']}")
         else:
             for a in album_data:
                 name = a["name"][:40] + "..." if len(a["name"]) > 40 else a["name"]
                 artist = a["artist"][:20] + "..." if len(a["artist"]) > 20 else a["artist"]
-                output.append(f"{name} - {artist} ({a['id']})")
+                output.append(f"{name} - {artist} ({a['track_count']}) {a['id']}")
 
         return "\n".join(output)
 
@@ -871,26 +897,66 @@ def get_library_artists() -> str:
     """
     Get all artists in your Apple Music library.
 
-    Returns: List of artists
+    Returns: Artist count, CSV file path, and artist listing
     """
     try:
         headers = get_headers()
-        response = requests.get(
-            f"{BASE_URL}/me/library/artists",
-            headers=headers,
-            params={"limit": 100},
-        )
-        response.raise_for_status()
-        data = response.json()
+        all_artists = []
+        offset = 0
 
-        output = []
-        for artist in data.get("data", []):
+        # Paginate to get all artists
+        while True:
+            response = requests.get(
+                f"{BASE_URL}/me/library/artists",
+                headers=headers,
+                params={"limit": 100, "offset": offset},
+            )
+            if response.status_code == 404:
+                break
+            response.raise_for_status()
+            artists = response.json().get("data", [])
+            if not artists:
+                break
+            all_artists.extend(artists)
+            if len(artists) < 100:
+                break
+            offset += 100
+
+        if not all_artists:
+            return "No artists in library"
+
+        # Extract artist data (library artists have limited metadata)
+        artist_data = []
+        for artist in all_artists:
             attrs = artist.get("attributes", {})
-            name = attrs.get("name", "Unknown")
-            artist_id = artist.get("id")
-            output.append(f"{name} [library ID: {artist_id}]")
+            artist_data.append({
+                "id": artist.get("id", ""),
+                "name": attrs.get("name", ""),
+            })
 
-        return "\n".join(output) if output else "No artists in library"
+        # Write CSV
+        csv_path = get_cache_dir() / "library_artists.csv"
+        csv_fields = ["name", "id"]
+
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=csv_fields)
+            writer.writeheader()
+            writer.writerows(artist_data)
+
+        # Build output
+        count = len(artist_data)
+        output = [f"=== {count} artists ===", f"Full data: {csv_path}", ""]
+
+        # Tiered display
+        if count <= 200:
+            for a in artist_data:
+                output.append(f"{a['name']} [library ID: {a['id']}]")
+        else:
+            for a in artist_data:
+                name = a["name"][:40] + "..." if len(a["name"]) > 40 else a["name"]
+                output.append(f"{name} ({a['id']})")
+
+        return "\n".join(output)
 
     except requests.exceptions.RequestException as e:
         return f"API Error: {str(e)}"
@@ -899,12 +965,13 @@ def get_library_artists() -> str:
 
 
 @mcp.tool()
-def get_library_songs(limit: int = 100) -> str:
+def get_library_songs(limit: int = 100, include_extras: bool = False) -> str:
     """
     Get songs from your Apple Music library (not a search, just browse).
 
     Args:
         limit: Number of songs to return (default 100, use 0 for all songs)
+        include_extras: Include extra metadata in CSV (track/disc numbers, artwork, etc.)
 
     Returns: Song count, CSV file path, and song listing
     """
@@ -936,59 +1003,17 @@ def get_library_songs(limit: int = 100) -> str:
         if not all_songs:
             return "No songs in library"
 
-        # Extract full song data
-        song_data = []
-        for song in all_songs:
-            attrs = song.get("attributes", {})
-            play_params = attrs.get("playParams", {})
-            genres = attrs.get("genreNames", [])
+        # Extract song data using helper
+        song_data = [extract_track_data(s, include_extras) for s in all_songs]
 
-            song_data.append({
-                "id": song.get("id", ""),
-                "catalog_id": play_params.get("catalogId", ""),
-                "name": attrs.get("name", ""),
-                "artist": attrs.get("artistName", ""),
-                "album": attrs.get("albumName", ""),
-                "duration_ms": attrs.get("durationInMillis", 0),
-                "duration": format_duration(attrs.get("durationInMillis", 0)),
-                "track_number": attrs.get("trackNumber", ""),
-                "disc_number": attrs.get("discNumber", ""),
-                "genre": genres[0] if genres else "",
-                "genres": ", ".join(genres),
-                "release_date": attrs.get("releaseDate", ""),
-                "has_lyrics": attrs.get("hasLyrics", False),
-                "artwork_url": attrs.get("artwork", {}).get("url", "").replace("{w}x{h}", "500x500"),
-            })
-
-        # Write CSV with full data
+        # Write CSV using helper
         csv_path = get_cache_dir() / "library_songs.csv"
-        csv_fields = ["name", "duration", "artist", "album", "track_number", "disc_number",
-                      "release_date", "genre", "genres", "has_lyrics", "id", "catalog_id", "artwork_url"]
-
-        with open(csv_path, "w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=csv_fields)
-            writer.writeheader()
-            writer.writerows(song_data)
+        write_tracks_csv(song_data, csv_path, include_extras)
 
         # Build output
         count = len(song_data)
         output = [f"=== {count} songs ===", f"Full data: {csv_path}", ""]
-
-        # Tiered display
-        if count <= 120:
-            for s in song_data:
-                year = s["release_date"][:4] if s["release_date"] else ""
-                year_str = f" [{year}]" if year else ""
-                output.append(f"{s['name']} ({s['duration']}) - {s['artist']} | {s['album']}{year_str} (ID: {s['id']})")
-        elif count <= 350:
-            for s in song_data:
-                name = s["name"][:45] + "..." if len(s["name"]) > 45 else s["name"]
-                artist = s["artist"][:25] + "..." if len(s["artist"]) > 25 else s["artist"]
-                output.append(f"{name} - {artist} ({s['id']})")
-        else:
-            for s in song_data:
-                name = s["name"][:30] + "..." if len(s["name"]) > 30 else s["name"]
-                output.append(f"{name} {s['id']}")
+        output.extend(format_track_list(song_data))
 
         return "\n".join(output)
 
@@ -1006,7 +1031,7 @@ def get_recommendations() -> str:
     """
     Get personalized music recommendations based on your listening history.
 
-    Returns: Recommended albums, playlists, and stations
+    Returns: Grouped recommendations with IDs for adding to library/playlists
     """
     try:
         headers = get_headers()
@@ -1019,8 +1044,9 @@ def get_recommendations() -> str:
         data = response.json()
 
         output = []
+        all_items = []
+
         for rec in data.get("data", []):
-            rec_type = rec.get("type", "unknown")
             attrs = rec.get("attributes", {})
             title = attrs.get("title", {}).get("stringForDisplay", "Recommendation")
 
@@ -1030,15 +1056,43 @@ def get_recommendations() -> str:
             relationships = rec.get("relationships", {})
             contents = relationships.get("contents", {}).get("data", [])
 
-            for item in contents[:5]:  # Limit items per recommendation
+            for item in contents[:8]:
                 item_attrs = item.get("attributes", {})
                 name = item_attrs.get("name", "Unknown")
                 artist = item_attrs.get("artistName", "")
-                item_type = item.get("type", "")
+                item_type = item.get("type", "").replace("library-", "")
+                item_id = item.get("id")
+                year = item_attrs.get("releaseDate", "")[:4]
+                year_str = f" [{year}]" if year else ""
+
+                all_items.append({
+                    "category": title,
+                    "name": name,
+                    "artist": artist,
+                    "type": item_type,
+                    "id": item_id,
+                    "year": year,
+                })
+
                 if artist:
-                    output.append(f"  {name} - {artist} ({item_type})")
+                    output.append(f"  {name} - {artist}{year_str} ({item_type}) [ID: {item_id}]")
                 else:
-                    output.append(f"  {name} ({item_type})")
+                    output.append(f"  {name}{year_str} ({item_type}) [ID: {item_id}]")
+
+            output.append("")
+
+        # Write CSV with all recommendations
+        if all_items:
+            csv_path = get_cache_dir() / "recommendations.csv"
+            csv_fields = ["category", "name", "artist", "type", "year", "id"]
+
+            with open(csv_path, "w", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(f, fieldnames=csv_fields)
+                writer.writeheader()
+                writer.writerows(all_items)
+
+            output.insert(0, f"Full data: {csv_path}")
+            output.insert(0, f"=== {len(all_items)} recommendations ===")
 
         return "\n".join(output) if output else "No recommendations available"
 
@@ -1053,10 +1107,11 @@ def get_heavy_rotation() -> str:
     """
     Get your heavy rotation - content you've been playing frequently.
 
-    Returns: Albums and playlists you play most often
+    Returns: Count, CSV file path, and albums/playlists you play most often
     """
     try:
         headers = get_headers()
+        # Note: heavy-rotation endpoint doesn't accept limit parameter
         response = requests.get(
             f"{BASE_URL}/me/history/heavy-rotation",
             headers=headers,
@@ -1064,19 +1119,51 @@ def get_heavy_rotation() -> str:
         response.raise_for_status()
         data = response.json()
 
-        output = ["=== Heavy Rotation (Your Most Played) ==="]
-        for item in data.get("data", []):
+        items = data.get("data", [])
+        if not items:
+            return "No heavy rotation data"
+
+        # Extract item data
+        item_data = []
+        for item in items:
             attrs = item.get("attributes", {})
-            name = attrs.get("name", "Unknown")
-            artist = attrs.get("artistName", "")
-            item_type = item.get("type", "").replace("library-", "").replace("-", " ")
+            genres = attrs.get("genreNames", [])
 
-            if artist:
-                output.append(f"{name} - {artist} ({item_type})")
+            item_data.append({
+                "id": item.get("id", ""),
+                "name": attrs.get("name", ""),
+                "artist": attrs.get("artistName", ""),
+                "type": item.get("type", "").replace("library-", "").replace("-", " "),
+                "track_count": attrs.get("trackCount", ""),
+                "genre": genres[0] if genres else "",
+                "release_date": attrs.get("releaseDate", ""),
+                "date_added": attrs.get("dateAdded", ""),
+                "artwork_url": attrs.get("artwork", {}).get("url", "").replace("{w}x{h}", "500x500"),
+            })
+
+        # Write CSV
+        csv_path = get_cache_dir() / "heavy_rotation.csv"
+        csv_fields = ["name", "artist", "type", "track_count", "genre", "release_date", "date_added", "id", "artwork_url"]
+
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=csv_fields)
+            writer.writeheader()
+            writer.writerows(item_data)
+
+        # Build output
+        count = len(item_data)
+        output = [f"=== {count} items in heavy rotation ===", f"Full data: {csv_path}", ""]
+
+        for item in item_data:
+            year = item["release_date"][:4] if item["release_date"] else ""
+            year_str = f" [{year}]" if year else ""
+            tracks_str = f" ({item['track_count']} tracks)" if item["track_count"] else ""
+            if item["artist"]:
+                output.append(f"{item['name']} - {item['artist']}{tracks_str}{year_str} ({item['type']}) [ID: {item['id']}]")
             else:
-                output.append(f"{name} ({item_type})")
+                output.append(f"{item['name']}{tracks_str}{year_str} ({item['type']}) [ID: {item['id']}]")
 
-        return "\n".join(output) if len(output) > 1 else "No heavy rotation data"
+        return "\n".join(output)
 
     except requests.exceptions.RequestException as e:
         return f"API Error: {str(e)}"
@@ -1085,77 +1172,84 @@ def get_heavy_rotation() -> str:
 
 
 @mcp.tool()
-def get_recently_added() -> str:
+def get_recently_added(limit: int = 50) -> str:
     """
     Get content recently added to your library.
 
-    Returns: Recently added albums, songs, and playlists
+    Args:
+        limit: Number of items to return (default 50)
+
+    Returns: Count, CSV file path, and recently added albums/songs/playlists
     """
     try:
         headers = get_headers()
-        response = requests.get(
-            f"{BASE_URL}/me/library/recently-added",
-            headers=headers,
-            params={"limit": 25},
-        )
-        response.raise_for_status()
-        data = response.json()
+        all_items = []
+        offset = 0
+        max_to_fetch = min(limit, 100)
 
-        output = ["=== Recently Added to Library ==="]
-        for item in data.get("data", []):
-            attrs = item.get("attributes", {})
-            name = attrs.get("name", "Unknown")
-            artist = attrs.get("artistName", "")
-            item_type = item.get("type", "").replace("library-", "")
-            item_id = item.get("id")
-
-            if artist:
-                output.append(f"{name} - {artist} ({item_type}) [ID: {item_id}]")
-            else:
-                output.append(f"{name} ({item_type}) [ID: {item_id}]")
-
-        return "\n".join(output) if len(output) > 1 else "No recently added content"
-
-    except requests.exceptions.RequestException as e:
-        return f"API Error: {str(e)}"
-    except (FileNotFoundError, ValueError) as e:
-        return str(e)
-
-
-@mcp.tool()
-def get_recently_played_tracks() -> str:
-    """
-    Get individual tracks you've played recently (not just albums/playlists).
-
-    Returns: Recently played songs with details
-    """
-    try:
-        headers = get_headers()
-        all_tracks = []
-
-        # API limits to 10 per request, max 50 total
-        for offset in range(0, 50, 10):
+        # Paginate
+        while len(all_items) < max_to_fetch:
+            batch_limit = min(25, max_to_fetch - len(all_items))
             response = requests.get(
-                f"{BASE_URL}/me/recent/played/tracks",
+                f"{BASE_URL}/me/library/recently-added",
                 headers=headers,
-                params={"limit": 10, "offset": offset},
+                params={"limit": batch_limit, "offset": offset},
             )
-            if response.status_code != 200:
+            if response.status_code == 404:
                 break
-            tracks = response.json().get("data", [])
-            if not tracks:
+            response.raise_for_status()
+            items = response.json().get("data", [])
+            if not items:
                 break
-            all_tracks.extend(tracks)
+            all_items.extend(items)
+            if len(items) < batch_limit:
+                break
+            offset += 25  # Recently-added uses fixed 25-item pages
 
-        output = ["=== Recently Played Tracks ==="]
-        for track in all_tracks:
-            attrs = track.get("attributes", {})
-            name = attrs.get("name", "Unknown")
-            artist = attrs.get("artistName", "Unknown")
-            album = attrs.get("albumName", "")
-            output.append(f"{name} - {artist}" + (f" ({album})" if album else ""))
+        if not all_items:
+            return "No recently added content"
 
-        return "\n".join(output) if len(output) > 1 else "No recently played tracks"
+        # Extract item data
+        item_data = []
+        for item in all_items:
+            attrs = item.get("attributes", {})
+            genres = attrs.get("genreNames", [])
+
+            item_data.append({
+                "id": item.get("id", ""),
+                "name": attrs.get("name", ""),
+                "artist": attrs.get("artistName", ""),
+                "type": item.get("type", "").replace("library-", ""),
+                "track_count": attrs.get("trackCount", ""),
+                "genre": genres[0] if genres else "",
+                "release_date": attrs.get("releaseDate", ""),
+                "date_added": attrs.get("dateAdded", ""),
+                "artwork_url": attrs.get("artwork", {}).get("url", "").replace("{w}x{h}", "500x500"),
+            })
+
+        # Write CSV
+        csv_path = get_cache_dir() / "recently_added.csv"
+        csv_fields = ["name", "artist", "type", "track_count", "genre", "release_date", "date_added", "id", "artwork_url"]
+
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=csv_fields)
+            writer.writeheader()
+            writer.writerows(item_data)
+
+        # Build output
+        count = len(item_data)
+        output = [f"=== {count} recently added items ===", f"Full data: {csv_path}", ""]
+
+        for item in item_data:
+            date_added = item["date_added"][:10] if item["date_added"] else ""
+            date_str = f" [added {date_added}]" if date_added else ""
+            tracks_str = f" ({item['track_count']} tracks)" if item["track_count"] else ""
+            if item["artist"]:
+                output.append(f"{item['name']} - {item['artist']}{tracks_str} ({item['type']}){date_str} [ID: {item['id']}]")
+            else:
+                output.append(f"{item['name']}{tracks_str} ({item['type']}){date_str} [ID: {item['id']}]")
+
+        return "\n".join(output)
 
     except requests.exceptions.RequestException as e:
         return f"API Error: {str(e)}"
@@ -1380,12 +1474,13 @@ def get_song_details(song_id: str) -> str:
             return "Song not found"
 
         attrs = songs[0].get("attributes", {})
+        duration = format_duration(attrs.get("durationInMillis", 0)) or "Unknown"
         output = [
             f"Title: {attrs.get('name', 'Unknown')}",
             f"Artist: {attrs.get('artistName', 'Unknown')}",
             f"Album: {attrs.get('albumName', 'Unknown')}",
             f"Genre: {', '.join(attrs.get('genreNames', ['Unknown']))}",
-            f"Duration: {attrs.get('durationInMillis', 0) // 60000}:{(attrs.get('durationInMillis', 0) // 1000) % 60:02d}",
+            f"Duration: {duration}",
             f"Release Date: {attrs.get('releaseDate', 'Unknown')}",
             f"Explicit: {'Yes' if attrs.get('contentRating') == 'explicit' else 'No'}",
             f"ISRC: {attrs.get('isrc', 'N/A')}",
@@ -1548,8 +1643,7 @@ def get_music_videos(query: str = "") -> str:
             attrs = video.get("attributes", {})
             name = attrs.get("name", "Unknown")
             artist = attrs.get("artistName", "Unknown")
-            duration_ms = attrs.get("durationInMillis", 0)
-            duration = f"{duration_ms // 60000}:{(duration_ms // 1000) % 60:02d}"
+            duration = format_duration(attrs.get("durationInMillis", 0)) or "0:00"
             video_id = video.get("id")
             output.append(f"{name} - {artist} [{duration}] (ID: {video_id})")
 
@@ -1732,6 +1826,215 @@ def get_personal_station() -> str:
             "This station plays music based on your listening history and preferences.",
         ]
         return "\n".join(output)
+
+    except requests.exceptions.RequestException as e:
+        return f"API Error: {str(e)}"
+    except (FileNotFoundError, ValueError) as e:
+        return str(e)
+
+
+# ============ CACHE MANAGEMENT ============
+
+
+@mcp.tool()
+def clear_cache(days_old: int = 0) -> str:
+    """
+    Clear cached CSV files from the export directory.
+
+    Args:
+        days_old: Only delete files older than this many days (0 = delete all)
+
+    Returns: Summary of deleted files and space reclaimed
+    """
+    try:
+        cache_dir = get_cache_dir()
+        if not cache_dir.exists():
+            return "Cache directory doesn't exist"
+
+        csv_files = list(cache_dir.glob("*.csv"))
+        if not csv_files:
+            return "No CSV files in cache"
+
+        now = time.time()
+        cutoff = now - (days_old * 86400) if days_old > 0 else now + 1  # +1 to delete all
+
+        deleted = []
+        kept = []
+        total_size = 0
+
+        for f in csv_files:
+            file_age_days = (now - f.stat().st_mtime) / 86400
+            file_size = f.stat().st_size
+
+            if days_old == 0 or f.stat().st_mtime < cutoff:
+                deleted.append(f.name)
+                total_size += file_size
+                f.unlink()
+            else:
+                kept.append(f.name)
+
+        # Format size
+        if total_size < 1024:
+            size_str = f"{total_size} bytes"
+        elif total_size < 1024 * 1024:
+            size_str = f"{total_size / 1024:.1f} KB"
+        else:
+            size_str = f"{total_size / (1024 * 1024):.1f} MB"
+
+        output = [f"=== Cache cleanup ==="]
+        output.append(f"Deleted: {len(deleted)} files ({size_str})")
+
+        if kept:
+            output.append(f"Kept: {len(kept)} files (newer than {days_old} days)")
+
+        if deleted:
+            output.append("")
+            output.append("Deleted files:")
+            for f in deleted[:20]:  # Limit display
+                output.append(f"  - {f}")
+            if len(deleted) > 20:
+                output.append(f"  ... and {len(deleted) - 20} more")
+
+        return "\n".join(output)
+
+    except Exception as e:
+        return f"Error clearing cache: {str(e)}"
+
+
+@mcp.tool()
+def get_cache_info() -> str:
+    """
+    Get information about cached CSV files.
+
+    Returns: List of cached files with sizes and ages
+    """
+    try:
+        cache_dir = get_cache_dir()
+        if not cache_dir.exists():
+            return "Cache directory doesn't exist"
+
+        csv_files = sorted(cache_dir.glob("*.csv"), key=lambda f: f.stat().st_mtime, reverse=True)
+        if not csv_files:
+            return "No CSV files in cache"
+
+        now = time.time()
+        total_size = 0
+        output = [f"=== Cache: {cache_dir} ===", ""]
+
+        for f in csv_files:
+            file_size = f.stat().st_size
+            total_size += file_size
+            age_days = (now - f.stat().st_mtime) / 86400
+
+            if file_size < 1024:
+                size_str = f"{file_size}B"
+            elif file_size < 1024 * 1024:
+                size_str = f"{file_size / 1024:.0f}KB"
+            else:
+                size_str = f"{file_size / (1024 * 1024):.1f}MB"
+
+            if age_days < 1:
+                age_str = f"{age_days * 24:.0f}h ago"
+            else:
+                age_str = f"{age_days:.0f}d ago"
+
+            output.append(f"{f.name} ({size_str}, {age_str})")
+
+        # Total
+        if total_size < 1024 * 1024:
+            total_str = f"{total_size / 1024:.1f} KB"
+        else:
+            total_str = f"{total_size / (1024 * 1024):.1f} MB"
+
+        output.insert(1, f"Total: {len(csv_files)} files, {total_str}")
+
+        return "\n".join(output)
+
+    except Exception as e:
+        return f"Error reading cache: {str(e)}"
+
+
+@mcp.tool()
+def test_output_size(target_chars: int = 50000) -> str:
+    """
+    Diagnostic tool to test MCP response size limits using real library data.
+
+    Fetches tracks from multiple playlists to build unique (non-repeating) content
+    until hitting the target character count. Use this to find where output gets
+    truncated by checking if the END marker is visible.
+
+    Args:
+        target_chars: Target character count to test (default 50000)
+
+    Returns: Real track data from your library, with markers to detect truncation
+    """
+    try:
+        headers = get_headers()
+
+        # Fetch all playlists
+        response = requests.get(
+            f"{BASE_URL}/me/library/playlists",
+            headers=headers,
+            params={"limit": 100},
+        )
+        response.raise_for_status()
+        playlists = response.json().get("data", [])
+
+        if not playlists:
+            return "No playlists found in library"
+
+        # Build output by fetching tracks from different playlists
+        header = f"=== SIZE TEST: {target_chars:,} chars target ===\n"
+        header += f"=== Found {len(playlists)} playlists to draw from ===\n\n"
+
+        content = header
+        playlists_used = 0
+        total_tracks = 0
+
+        for playlist in playlists:
+            if len(content) >= target_chars:
+                break
+
+            playlist_id = playlist.get("id", "")
+            playlist_name = playlist.get("attributes", {}).get("name", "Unknown")
+
+            # Fetch this playlist's tracks
+            try:
+                track_response = requests.get(
+                    f"{BASE_URL}/me/library/playlists/{playlist_id}/tracks",
+                    headers=headers,
+                    params={"limit": 100},
+                )
+                track_response.raise_for_status()
+                tracks = track_response.json().get("data", [])
+            except requests.exceptions.RequestException:
+                continue  # Skip playlists that fail
+
+            if not tracks:
+                continue
+
+            # Format and add this playlist's tracks
+            playlist_header = f"--- {playlist_name} ({len(tracks)} tracks, char {len(content):,}) ---\n"
+            content += playlist_header
+
+            for t in tracks:
+                if len(content) >= target_chars:
+                    break
+                data = extract_track_data(t, include_extras=False)
+                line = _format_full(data)
+                content += line + "\n"
+                total_tracks += 1
+
+            content += "\n"
+            playlists_used += 1
+
+        # If we still haven't hit target, note it
+        if len(content) < target_chars:
+            content += f"\n(Exhausted all {len(playlists)} playlists at {len(content):,} chars)\n"
+
+        footer = f"\n\n=== END: {len(content):,} chars, {playlists_used} playlists, {total_tracks} tracks ==="
+
+        return content + footer
 
     except requests.exceptions.RequestException as e:
         return f"API Error: {str(e)}"

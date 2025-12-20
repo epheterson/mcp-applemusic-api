@@ -161,7 +161,7 @@ Ask Claude things like:
 
 ---
 
-## Tools Available (31 total)
+## Tools Available (33 total)
 
 ### Playlists
 
@@ -218,6 +218,17 @@ Ask Claude things like:
 | Tool | Description |
 |------|-------------|
 | `check_auth_status` | Verify tokens and API connection |
+| `get_cache_info` | Show CSV export cache directory and files |
+| `clear_cache` | Clear cached CSV exports |
+
+### Output Format
+
+Track listings automatically select the most detailed format that fits within the MCP response limit (~50K characters):
+- **Full**: `Name - Artist (duration) Album [Year] Genre id`
+- **Compact**: `Name - Artist (duration) id` (for larger results)
+- **Minimal**: `Name - Artist id` (for very large results)
+
+CSV exports always include complete data regardless of display tier. Core fields: `name, duration, artist, album, year, genre, id`. Pass `include_extras=True` for additional metadata (track numbers, artwork URLs, ISRC, etc.)
 
 ---
 
@@ -331,11 +342,11 @@ applemusic-mcp serve           # Run MCP server (usually auto-launched)
 # Install dev dependencies
 pip install -e ".[dev]"
 
-# Run tests
+# Run unit tests (48 tests)
 pytest
 
-# Validate all endpoints against your live library
-python scripts/validate_endpoints.py
+# Run integration tests against your live library
+python scripts/integration_test.py
 
 # Format code
 black src/ tests/

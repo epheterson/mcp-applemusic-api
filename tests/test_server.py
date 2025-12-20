@@ -331,3 +331,207 @@ class TestCheckAuthStatus:
         result = server.check_auth_status()
 
         assert "EXPIRES IN" in result or "10" in result
+
+
+class TestFormatDuration:
+    """Tests for format_duration helper function."""
+
+    def test_formats_standard_duration(self):
+        """Should format milliseconds as m:ss."""
+        assert server.format_duration(225000) == "3:45"
+        assert server.format_duration(60000) == "1:00"
+        assert server.format_duration(5000) == "0:05"
+
+    def test_handles_zero(self):
+        """Should return empty string for zero."""
+        assert server.format_duration(0) == ""
+
+    def test_handles_none(self):
+        """Should return empty string for None."""
+        assert server.format_duration(None) == ""
+
+    def test_handles_negative(self):
+        """Should return empty string for negative values."""
+        assert server.format_duration(-1000) == ""
+        assert server.format_duration(-60000) == ""
+
+    def test_handles_large_duration(self):
+        """Should handle songs longer than an hour."""
+        # 1 hour, 5 minutes, 30 seconds = 3930000 ms
+        assert server.format_duration(3930000) == "65:30"
+
+
+class TestExtractTrackData:
+    """Tests for extract_track_data helper function."""
+
+    def test_extracts_basic_fields(self):
+        """Should extract core fields from track data."""
+        track = {
+            "id": "i.abc123",
+            "attributes": {
+                "name": "Wonderwall",
+                "artistName": "Oasis",
+                "albumName": "(What's the Story) Morning Glory?",
+                "durationInMillis": 258000,
+                "releaseDate": "1995-10-02",
+                "genreNames": ["Rock", "Alternative"],
+            }
+        }
+        result = server.extract_track_data(track)
+
+        assert result["name"] == "Wonderwall"
+        assert result["artist"] == "Oasis"
+        assert result["album"] == "(What's the Story) Morning Glory?"
+        assert result["duration"] == "4:18"
+        assert result["year"] == "1995"
+        assert result["genre"] == "Rock"
+        assert result["id"] == "i.abc123"
+
+    def test_handles_empty_track(self):
+        """Should handle empty track dict gracefully."""
+        result = server.extract_track_data({})
+
+        assert result["name"] == ""
+        assert result["artist"] == ""
+        assert result["duration"] == ""
+        assert result["id"] == ""
+
+    def test_handles_missing_attributes(self):
+        """Should handle track with empty attributes."""
+        track = {"id": "test123", "attributes": {}}
+        result = server.extract_track_data(track)
+
+        assert result["id"] == "test123"
+        assert result["name"] == ""
+
+    def test_includes_extras_when_requested(self):
+        """Should include extra fields when include_extras=True."""
+        track = {
+            "id": "123",
+            "attributes": {
+                "name": "Test",
+                "trackNumber": 5,
+                "discNumber": 2,
+                "hasLyrics": True,
+                "composerName": "John Doe",
+                "isrc": "USRC12345678",
+                "contentRating": "explicit",
+                "playParams": {"catalogId": "cat123"},
+                "previews": [{"url": "https://example.com/preview.m4a"}],
+                "artwork": {"url": "https://example.com/{w}x{h}bb.jpg"},
+            }
+        }
+        result = server.extract_track_data(track, include_extras=True)
+
+        assert result["track_number"] == 5
+        assert result["disc_number"] == 2
+        assert result["has_lyrics"] is True
+        assert result["composer"] == "John Doe"
+        assert result["isrc"] == "USRC12345678"
+        assert result["is_explicit"] is True
+        assert result["catalog_id"] == "cat123"
+        assert "preview.m4a" in result["preview_url"]
+        assert "500x500" in result["artwork_url"]
+
+
+class TestTruncate:
+    """Tests for truncate helper function."""
+
+    def test_truncates_long_string(self):
+        """Should truncate and add ellipsis for strings exceeding max length."""
+        result = server.truncate("This is a very long string", 10)
+        assert result == "This is a ..."
+        assert len(result) == 13  # 10 chars + "..."
+
+    def test_returns_short_string_unchanged(self):
+        """Should return strings shorter than max unchanged."""
+        result = server.truncate("Short", 10)
+        assert result == "Short"
+
+    def test_returns_exact_length_unchanged(self):
+        """Should return strings exactly at max length unchanged."""
+        result = server.truncate("TenChars!!", 10)
+        assert result == "TenChars!!"
+
+    def test_handles_empty_string(self):
+        """Should handle empty string."""
+        result = server.truncate("", 10)
+        assert result == ""
+
+
+class TestFormatTrackList:
+    """Tests for format_track_list helper function."""
+
+    def test_full_format_for_small_lists(self):
+        """Should use full format for <= 150 tracks."""
+        tracks = [{
+            "name": "Song Name",
+            "artist": "Artist Name",
+            "duration": "3:45",
+            "album": "Album Name",
+            "year": "2024",
+            "genre": "Rock",
+            "id": "123"
+        }]
+        result = server.format_track_list(tracks)
+
+        assert len(result) == 1
+        assert "Song Name - Artist Name (3:45) Album Name [2024] Rock 123" == result[0]
+
+    def test_compact_format_when_full_exceeds_limit(self):
+        """Should use compact format when full format exceeds MAX_OUTPUT_CHARS."""
+        # Create tracks with long names/albums to exceed 50K char limit in full format
+        track = {
+            "name": "A" * 100,  # Long name
+            "artist": "B" * 50,  # Long artist
+            "duration": "3:00",
+            "album": "C" * 100,  # Long album
+            "year": "2024",
+            "genre": "Rock",
+            "id": "12345678901234567890"
+        }
+        # ~300 chars per line in full format * 200 tracks = 60K chars > 50K limit
+        tracks = [track] * 200
+        result = server.format_track_list(tracks)
+
+        assert len(result) == 200
+        # Check truncation occurred (compact format truncates names)
+        assert "..." in result[0]
+        # Album should NOT be in compact format
+        assert "C" * 100 not in result[0]
+
+    def test_minimal_format_when_compact_exceeds_limit(self):
+        """Should use minimal format when compact format also exceeds limit."""
+        # Create enough tracks that even compact format exceeds limit
+        track = {
+            "name": "A" * 50,
+            "artist": "B" * 30,
+            "duration": "3:00",
+            "album": "Album",
+            "year": "2024",
+            "genre": "Rock",
+            "id": "12345678901234567890"
+        }
+        # ~90 chars per compact line * 600 tracks = 54K chars > 50K limit
+        tracks = [track] * 600
+        result = server.format_track_list(tracks)
+
+        assert len(result) == 600
+        # Minimal format should not include duration
+        assert "(3:00)" not in result[0]
+
+    def test_handles_empty_optional_fields(self):
+        """Should handle tracks with empty year/genre gracefully."""
+        tracks = [{
+            "name": "Song",
+            "artist": "Artist",
+            "duration": "3:00",
+            "album": "Album",
+            "year": "",
+            "genre": "",
+            "id": "123"
+        }]
+        result = server.format_track_list(tracks)
+
+        assert "[" not in result[0]  # No year brackets
+        assert result[0] == "Song - Artist (3:00) Album 123"

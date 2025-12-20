@@ -1,12 +1,31 @@
 """MCP server for Apple Music API - Cross-platform playlist and library management."""
 
+import csv
 import json
 import time
+from pathlib import Path
 
 import requests
 from mcp.server.fastmcp import FastMCP
 
 from .auth import get_developer_token, get_user_token, get_config_dir
+
+
+def get_cache_dir() -> Path:
+    """Get cache directory for CSV exports."""
+    cache_dir = Path.home() / ".cache" / "applemusic-mcp"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return cache_dir
+
+
+def format_duration(ms: int) -> str:
+    """Format milliseconds as mm:ss.mmm"""
+    if not ms:
+        return ""
+    total_seconds = ms / 1000
+    minutes = int(total_seconds // 60)
+    seconds = total_seconds % 60
+    return f"{minutes:02d}:{seconds:06.3f}"
 
 BASE_URL = "https://api.music.apple.com/v1"
 STOREFRONT = "us"
@@ -53,16 +72,31 @@ def get_headers() -> dict:
 def get_library_playlists() -> str:
     """
     Get all playlists from your Apple Music library.
-    Returns playlist names, IDs, and whether they're editable.
+    Returns playlist names, IDs, edit status, and metadata.
     Only API-created playlists can be edited.
     """
     try:
         headers = get_headers()
-        response = requests.get(
-            f"{BASE_URL}/me/library/playlists", headers=headers, params={"limit": 100}
-        )
-        response.raise_for_status()
-        data = response.json()
+        all_playlists = []
+        offset = 0
+
+        # Paginate to get all playlists
+        while True:
+            response = requests.get(
+                f"{BASE_URL}/me/library/playlists",
+                headers=headers,
+                params={"limit": 100, "offset": offset},
+            )
+            if response.status_code == 404:
+                break
+            response.raise_for_status()
+            playlists = response.json().get("data", [])
+            if not playlists:
+                break
+            all_playlists.extend(playlists)
+            if len(playlists) < 100:
+                break
+            offset += 100
 
         output = []
 
@@ -72,13 +106,42 @@ def get_library_playlists() -> str:
             output.append(warning)
             output.append("")
 
-        for playlist in data.get("data", []):
+        # Extract full playlist data
+        playlist_data = []
+        for playlist in all_playlists:
             attrs = playlist.get("attributes", {})
-            name = attrs.get("name", "Unknown")
-            can_edit = attrs.get("canEdit", False)
-            playlist_id = playlist.get("id")
-            edit_status = "editable" if can_edit else "read-only"
-            output.append(f"{name} (ID: {playlist_id}, {edit_status})")
+            desc = attrs.get("description", {})
+
+            playlist_data.append({
+                "id": playlist.get("id", ""),
+                "name": attrs.get("name", "Unknown"),
+                "can_edit": attrs.get("canEdit", False),
+                "is_public": attrs.get("isPublic", False),
+                "date_added": attrs.get("dateAdded", ""),
+                "last_modified": attrs.get("lastModifiedDate", ""),
+                "description": desc.get("standard", "") if isinstance(desc, dict) else str(desc),
+                "has_catalog": attrs.get("hasCatalog", False),
+            })
+
+        # Write CSV with full data
+        if playlist_data:
+            csv_path = get_cache_dir() / "library_playlists.csv"
+            csv_fields = ["name", "id", "can_edit", "is_public", "date_added", "last_modified", "description", "has_catalog"]
+
+            with open(csv_path, "w", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(f, fieldnames=csv_fields)
+                writer.writeheader()
+                writer.writerows(playlist_data)
+
+            output.append(f"=== {len(playlist_data)} playlists ===")
+            output.append(f"Full data: {csv_path}")
+            output.append("")
+
+        for p in playlist_data:
+            edit_status = "editable" if p["can_edit"] else "read-only"
+            modified = p["last_modified"][:10] if p["last_modified"] else ""
+            mod_str = f", modified {modified}" if modified else ""
+            output.append(f"{p['name']} (ID: {p['id']}, {edit_status}{mod_str})")
 
         return "\n".join(output) if output else "No playlists found"
 
@@ -96,7 +159,7 @@ def get_playlist_tracks(playlist_id: str) -> str:
     Args:
         playlist_id: The playlist ID (get from get_library_playlists)
 
-    Returns: List of tracks with their library IDs
+    Returns: Track count, CSV file path, and track listing (tiered based on size)
     """
     try:
         headers = get_headers()
@@ -121,15 +184,68 @@ def get_playlist_tracks(playlist_id: str) -> str:
                 break  # Last page
             offset += 100
 
-        output = []
+        if not all_tracks:
+            return "Playlist is empty"
+
+        # Extract full track data
+        track_data = []
         for track in all_tracks:
             attrs = track.get("attributes", {})
-            name = attrs.get("name", "Unknown")
-            artist = attrs.get("artistName", "Unknown")
-            track_id = track.get("id")
-            output.append(f"{name} - {artist} (library ID: {track_id})")
+            play_params = attrs.get("playParams", {})
+            genres = attrs.get("genreNames", [])
 
-        return "\n".join(output) if output else "Playlist is empty"
+            track_data.append({
+                "id": track.get("id", ""),
+                "catalog_id": play_params.get("catalogId", ""),
+                "name": attrs.get("name", ""),
+                "artist": attrs.get("artistName", ""),
+                "album": attrs.get("albumName", ""),
+                "duration_ms": attrs.get("durationInMillis", 0),
+                "duration": format_duration(attrs.get("durationInMillis", 0)),
+                "track_number": attrs.get("trackNumber", ""),
+                "disc_number": attrs.get("discNumber", ""),
+                "genre": genres[0] if genres else "",
+                "genres": ", ".join(genres),
+                "release_date": attrs.get("releaseDate", ""),
+                "has_lyrics": attrs.get("hasLyrics", False),
+                "artwork_url": attrs.get("artwork", {}).get("url", "").replace("{w}x{h}", "500x500"),
+            })
+
+        # Always write CSV with full data
+        csv_path = get_cache_dir() / f"playlist_{playlist_id.replace('.', '_')}.csv"
+        csv_fields = ["name", "duration", "artist", "album", "track_number", "disc_number",
+                      "release_date", "genre", "genres", "has_lyrics", "id", "catalog_id", "artwork_url"]
+
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=csv_fields, extrasaction="ignore")
+            writer.writeheader()
+            writer.writerows(track_data)
+
+        # Build output with count header
+        count = len(track_data)
+        output = [f"=== {count} tracks ===", f"Full data: {csv_path}", ""]
+
+        # Tiered display based on track count
+        if count <= 120:
+            # Full format: Name (duration) - Artist | Album [Year] Genre
+            for t in track_data:
+                year = t["release_date"][:4] if t["release_date"] else ""
+                year_str = f" [{year}]" if year else ""
+                genre_str = f" {t['genre']}" if t["genre"] else ""
+                output.append(f"{t['name']} ({t['duration']}) - {t['artist']} | {t['album']}{year_str}{genre_str} (ID: {t['id']})")
+        elif count <= 350:
+            # Compact: Name - Artist (ID)
+            for t in track_data:
+                name = t["name"][:45] + "..." if len(t["name"]) > 45 else t["name"]
+                artist = t["artist"][:25] + "..." if len(t["artist"]) > 25 else t["artist"]
+                output.append(f"{name} - {artist} ({t['id']})")
+        else:
+            # Minimal: truncated name + ID only
+            for t in track_data:
+                name = t["name"][:30] + "..." if len(t["name"]) > 30 else t["name"]
+                output.append(f"{name} {t['id']}")
+
+        return "\n".join(output)
 
     except requests.exceptions.RequestException as e:
         return f"API Error: {str(e)}"
@@ -279,12 +395,13 @@ def copy_playlist(source_playlist_id: str, new_name: str) -> str:
 
 
 @mcp.tool()
-def search_library(query: str) -> str:
+def search_library(query: str, limit: int = 25) -> str:
     """
     Search your personal Apple Music library for songs.
 
     Args:
         query: Search term
+        limit: Max results to return (default 25)
 
     Returns: Songs from your library with library IDs (these can be added to playlists)
     """
@@ -294,26 +411,62 @@ def search_library(query: str) -> str:
         response = requests.get(
             f"{BASE_URL}/me/library/search",
             headers=headers,
-            params={"term": query, "types": "library-songs", "limit": 25},
+            params={"term": query, "types": "library-songs", "limit": min(limit, 25)},
         )
         response.raise_for_status()
         data = response.json()
 
         songs = data.get("results", {}).get("library-songs", {}).get("data", [])
 
-        output = []
+        if not songs:
+            return "No songs found"
+
+        # Extract full song data
+        song_data = []
         for song in songs:
             attrs = song.get("attributes", {})
-            name = attrs.get("name", "Unknown")
-            artist = attrs.get("artistName", "Unknown")
-            album = attrs.get("albumName", "")
-            song_id = song.get("id")
-            if album:
-                output.append(f"{name} - {artist} ({album}) [library ID: {song_id}]")
-            else:
-                output.append(f"{name} - {artist} [library ID: {song_id}]")
+            play_params = attrs.get("playParams", {})
+            genres = attrs.get("genreNames", [])
 
-        return "\n".join(output) if output else "No songs found"
+            song_data.append({
+                "id": song.get("id", ""),
+                "catalog_id": play_params.get("catalogId", ""),
+                "name": attrs.get("name", ""),
+                "artist": attrs.get("artistName", ""),
+                "album": attrs.get("albumName", ""),
+                "duration_ms": attrs.get("durationInMillis", 0),
+                "duration": format_duration(attrs.get("durationInMillis", 0)),
+                "track_number": attrs.get("trackNumber", ""),
+                "disc_number": attrs.get("discNumber", ""),
+                "genre": genres[0] if genres else "",
+                "genres": ", ".join(genres),
+                "release_date": attrs.get("releaseDate", ""),
+                "has_lyrics": attrs.get("hasLyrics", False),
+                "artwork_url": attrs.get("artwork", {}).get("url", "").replace("{w}x{h}", "500x500"),
+            })
+
+        # Write CSV with full data
+        safe_query = "".join(c if c.isalnum() else "_" for c in query)[:30]
+        csv_path = get_cache_dir() / f"search_library_{safe_query}.csv"
+        csv_fields = ["name", "duration", "artist", "album", "track_number", "disc_number",
+                      "release_date", "genre", "genres", "has_lyrics", "id", "catalog_id", "artwork_url"]
+
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=csv_fields)
+            writer.writeheader()
+            writer.writerows(song_data)
+
+        # Build output
+        count = len(song_data)
+        output = [f"=== {count} results for '{query}' ===", f"Full data: {csv_path}", ""]
+
+        # Display with full metadata (search results are always small)
+        for s in song_data:
+            year = s["release_date"][:4] if s["release_date"] else ""
+            year_str = f" [{year}]" if year else ""
+            output.append(f"{s['name']} ({s['duration']}) - {s['artist']} | {s['album']}{year_str} [library ID: {s['id']}]")
+
+        return "\n".join(output)
 
     except requests.exceptions.RequestException as e:
         return f"API Error: {str(e)}"
@@ -360,32 +513,91 @@ def add_to_library(catalog_ids: str) -> str:
 
 
 @mcp.tool()
-def get_recently_played() -> str:
+def get_recently_played(limit: int = 30) -> str:
     """
     Get recently played tracks from your Apple Music history.
 
-    Returns: List of recently played tracks
+    Args:
+        limit: Number of tracks to return (default 30, max 50)
+
+    Returns: Recently played tracks with full metadata and CSV export
     """
     try:
         headers = get_headers()
+        all_tracks = []
+        max_limit = min(limit, 50)
 
-        response = requests.get(
-            f"{BASE_URL}/me/recent/played/tracks",
-            headers=headers,
-            params={"limit": 20},
-        )
-        response.raise_for_status()
-        data = response.json()
+        # API limits to 10 per request, paginate up to max
+        for offset in range(0, max_limit, 10):
+            batch_limit = min(10, max_limit - offset)
+            response = requests.get(
+                f"{BASE_URL}/me/recent/played/tracks",
+                headers=headers,
+                params={"limit": batch_limit, "offset": offset},
+            )
+            if response.status_code != 200:
+                break
+            tracks = response.json().get("data", [])
+            if not tracks:
+                break
+            all_tracks.extend(tracks)
 
-        output = []
-        for track in data.get("data", []):
+        if not all_tracks:
+            return "No recently played tracks"
+
+        # Extract full track data
+        track_data = []
+        for track in all_tracks:
             attrs = track.get("attributes", {})
-            name = attrs.get("name", "Unknown")
-            artist = attrs.get("artistName", "Unknown")
-            album = attrs.get("albumName", "Unknown")
-            output.append(f"{name} - {artist} ({album})")
+            genres = attrs.get("genreNames", [])
+            previews = attrs.get("previews", [])
+            preview_url = previews[0].get("url", "") if previews else ""
 
-        return "\n".join(output) if output else "No recently played tracks"
+            track_data.append({
+                "id": track.get("id", ""),
+                "name": attrs.get("name", ""),
+                "artist": attrs.get("artistName", ""),
+                "album": attrs.get("albumName", ""),
+                "composer": attrs.get("composerName", ""),
+                "duration_ms": attrs.get("durationInMillis", 0),
+                "duration": format_duration(attrs.get("durationInMillis", 0)),
+                "track_number": attrs.get("trackNumber", ""),
+                "disc_number": attrs.get("discNumber", ""),
+                "genre": genres[0] if genres else "",
+                "genres": ", ".join(genres),
+                "release_date": attrs.get("releaseDate", ""),
+                "isrc": attrs.get("isrc", ""),
+                "is_apple_digital_master": attrs.get("isAppleDigitalMaster", False),
+                "has_lyrics": attrs.get("hasLyrics", False),
+                "content_rating": attrs.get("contentRating", ""),
+                "url": attrs.get("url", ""),
+                "preview_url": preview_url,
+                "artwork_url": attrs.get("artwork", {}).get("url", "").replace("{w}x{h}", "500x500"),
+            })
+
+        # Write CSV with full data
+        csv_path = get_cache_dir() / "recently_played.csv"
+        csv_fields = ["name", "duration", "artist", "album", "composer", "track_number", "disc_number",
+                      "release_date", "genre", "genres", "isrc", "is_apple_digital_master", "has_lyrics",
+                      "content_rating", "id", "url", "preview_url", "artwork_url"]
+
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=csv_fields)
+            writer.writeheader()
+            writer.writerows(track_data)
+
+        # Build output
+        count = len(track_data)
+        output = [f"=== {count} recently played tracks ===", f"Full data: {csv_path}", ""]
+
+        # Display with metadata
+        for t in track_data:
+            year = t["release_date"][:4] if t["release_date"] else ""
+            year_str = f" [{year}]" if year else ""
+            composer_str = f" (by {t['composer']})" if t["composer"] else ""
+            output.append(f"{t['name']} ({t['duration']}) - {t['artist']} | {t['album']}{year_str}{composer_str}")
+
+        return "\n".join(output)
 
     except requests.exceptions.RequestException as e:
         return f"API Error: {str(e)}"
@@ -397,22 +609,23 @@ def get_recently_played() -> str:
 
 
 @mcp.tool()
-def search_catalog(query: str, types: str = "songs") -> str:
+def search_catalog(query: str, types: str = "songs", limit: int = 15) -> str:
     """
     Search the Apple Music catalog.
 
     Args:
         query: Search term
         types: Comma-separated types (songs, albums, artists, playlists)
+        limit: Max results per type (default 15)
 
-    Returns: Search results with catalog IDs (use add_to_library to add these to your library first)
+    Returns: Search results with catalog IDs and full metadata (use add_to_library to add songs to your library first)
     """
     try:
         headers = get_headers()
         response = requests.get(
             f"{BASE_URL}/catalog/{STOREFRONT}/search",
             headers=headers,
-            params={"term": query, "types": types, "limit": 10},
+            params={"term": query, "types": types, "limit": min(limit, 25)},
         )
         response.raise_for_status()
         data = response.json()
@@ -421,29 +634,98 @@ def search_catalog(query: str, types: str = "songs") -> str:
         results = data.get("results", {})
 
         if "songs" in results:
-            output.append("=== Songs (use add_to_library with these IDs) ===")
-            for song in results["songs"].get("data", []):
+            songs = results["songs"].get("data", [])
+
+            # Extract full song data
+            song_data = []
+            for song in songs:
                 attrs = song.get("attributes", {})
-                name = attrs.get("name", "Unknown")
-                artist = attrs.get("artistName", "Unknown")
-                song_id = song.get("id")
-                output.append(f"  {name} - {artist} [catalog ID: {song_id}]")
+                genres = attrs.get("genreNames", [])
+                previews = attrs.get("previews", [])
+                preview_url = previews[0].get("url", "") if previews else ""
+
+                song_data.append({
+                    "id": song.get("id", ""),
+                    "name": attrs.get("name", ""),
+                    "artist": attrs.get("artistName", ""),
+                    "album": attrs.get("albumName", ""),
+                    "composer": attrs.get("composerName", ""),
+                    "duration_ms": attrs.get("durationInMillis", 0),
+                    "duration": format_duration(attrs.get("durationInMillis", 0)),
+                    "track_number": attrs.get("trackNumber", ""),
+                    "disc_number": attrs.get("discNumber", ""),
+                    "genre": genres[0] if genres else "",
+                    "genres": ", ".join(genres),
+                    "release_date": attrs.get("releaseDate", ""),
+                    "isrc": attrs.get("isrc", ""),
+                    "is_explicit": attrs.get("contentRating") == "explicit",
+                    "is_apple_digital_master": attrs.get("isAppleDigitalMaster", False),
+                    "has_lyrics": attrs.get("hasLyrics", False),
+                    "url": attrs.get("url", ""),
+                    "preview_url": preview_url,
+                    "artwork_url": attrs.get("artwork", {}).get("url", "").replace("{w}x{h}", "500x500"),
+                })
+
+            # Write CSV with full data
+            if song_data:
+                safe_query = "".join(c if c.isalnum() else "_" for c in query)[:30]
+                csv_path = get_cache_dir() / f"search_catalog_{safe_query}.csv"
+                csv_fields = ["name", "duration", "artist", "album", "composer", "track_number", "disc_number",
+                              "release_date", "genre", "genres", "isrc", "is_explicit", "is_apple_digital_master",
+                              "has_lyrics", "id", "url", "preview_url", "artwork_url"]
+
+                with open(csv_path, "w", newline="", encoding="utf-8") as f:
+                    writer = csv.DictWriter(f, fieldnames=csv_fields)
+                    writer.writeheader()
+                    writer.writerows(song_data)
+
+                output.append(f"=== {len(song_data)} Songs (use add_to_library with these IDs) ===")
+                output.append(f"Full data: {csv_path}")
+                output.append("")
+
+                for s in song_data:
+                    year = s["release_date"][:4] if s["release_date"] else ""
+                    year_str = f" [{year}]" if year else ""
+                    explicit_str = " [E]" if s["is_explicit"] else ""
+                    output.append(f"  {s['name']} ({s['duration']}) - {s['artist']} | {s['album']}{year_str}{explicit_str} [catalog ID: {s['id']}]")
 
         if "albums" in results:
-            output.append("=== Albums ===")
-            for album in results["albums"].get("data", []):
+            albums = results["albums"].get("data", [])
+            output.append("")
+            output.append(f"=== {len(albums)} Albums ===")
+            for album in albums:
                 attrs = album.get("attributes", {})
                 name = attrs.get("name", "Unknown")
                 artist = attrs.get("artistName", "Unknown")
+                year = attrs.get("releaseDate", "")[:4]
+                year_str = f" [{year}]" if year else ""
+                track_count = attrs.get("trackCount", 0)
                 album_id = album.get("id")
-                output.append(f"  {name} - {artist} [catalog ID: {album_id}]")
+                output.append(f"  {name} - {artist} ({track_count} tracks){year_str} [catalog ID: {album_id}]")
 
         if "artists" in results:
-            output.append("=== Artists ===")
-            for artist in results["artists"].get("data", []):
+            artists = results["artists"].get("data", [])
+            output.append("")
+            output.append(f"=== {len(artists)} Artists ===")
+            for artist in artists:
                 attrs = artist.get("attributes", {})
                 name = attrs.get("name", "Unknown")
-                output.append(f"  {name}")
+                genres = ", ".join(attrs.get("genreNames", [])[:2])
+                genre_str = f" ({genres})" if genres else ""
+                artist_id = artist.get("id")
+                output.append(f"  {name}{genre_str} [artist ID: {artist_id}]")
+
+        if "playlists" in results:
+            playlists = results["playlists"].get("data", [])
+            output.append("")
+            output.append(f"=== {len(playlists)} Playlists ===")
+            for playlist in playlists:
+                attrs = playlist.get("attributes", {})
+                name = attrs.get("name", "Unknown")
+                curator = attrs.get("curatorName", "")
+                curator_str = f" by {curator}" if curator else ""
+                playlist_id = playlist.get("id")
+                output.append(f"  {name}{curator_str} [playlist ID: {playlist_id}]")
 
         return "\n".join(output) if output else "No results found"
 
@@ -506,28 +788,77 @@ def get_library_albums() -> str:
     """
     Get all albums in your Apple Music library.
 
-    Returns: List of albums with artist names
+    Returns: Album count, CSV file path, and album listing
     """
     try:
         headers = get_headers()
-        response = requests.get(
-            f"{BASE_URL}/me/library/albums",
-            headers=headers,
-            params={"limit": 100},
-        )
-        response.raise_for_status()
-        data = response.json()
+        all_albums = []
+        offset = 0
 
-        output = []
-        for album in data.get("data", []):
+        while True:
+            response = requests.get(
+                f"{BASE_URL}/me/library/albums",
+                headers=headers,
+                params={"limit": 100, "offset": offset},
+            )
+            if response.status_code == 404:
+                break
+            response.raise_for_status()
+            albums = response.json().get("data", [])
+            if not albums:
+                break
+            all_albums.extend(albums)
+            if len(albums) < 100:
+                break
+            offset += 100
+
+        if not all_albums:
+            return "No albums in library"
+
+        # Extract full album data
+        album_data = []
+        for album in all_albums:
             attrs = album.get("attributes", {})
-            name = attrs.get("name", "Unknown")
-            artist = attrs.get("artistName", "Unknown")
-            track_count = attrs.get("trackCount", 0)
-            album_id = album.get("id")
-            output.append(f"{name} - {artist} ({track_count} tracks) [library ID: {album_id}]")
+            genres = attrs.get("genreNames", [])
 
-        return "\n".join(output) if output else "No albums in library"
+            album_data.append({
+                "id": album.get("id", ""),
+                "name": attrs.get("name", ""),
+                "artist": attrs.get("artistName", ""),
+                "track_count": attrs.get("trackCount", 0),
+                "genre": genres[0] if genres else "",
+                "genres": ", ".join(genres),
+                "release_date": attrs.get("releaseDate", ""),
+                "date_added": attrs.get("dateAdded", ""),
+                "artwork_url": attrs.get("artwork", {}).get("url", "").replace("{w}x{h}", "500x500"),
+            })
+
+        # Write CSV with full data
+        csv_path = get_cache_dir() / "library_albums.csv"
+        csv_fields = ["name", "artist", "track_count", "genre", "genres", "release_date", "date_added", "id", "artwork_url"]
+
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=csv_fields)
+            writer.writeheader()
+            writer.writerows(album_data)
+
+        # Build output
+        count = len(album_data)
+        output = [f"=== {count} albums ===", f"Full data: {csv_path}", ""]
+
+        # Tiered display
+        if count <= 150:
+            for a in album_data:
+                year = a["release_date"][:4] if a["release_date"] else ""
+                year_str = f" [{year}]" if year else ""
+                output.append(f"{a['name']} - {a['artist']} ({a['track_count']} tracks){year_str} [ID: {a['id']}]")
+        else:
+            for a in album_data:
+                name = a["name"][:40] + "..." if len(a["name"]) > 40 else a["name"]
+                artist = a["artist"][:20] + "..." if len(a["artist"]) > 20 else a["artist"]
+                output.append(f"{name} - {artist} ({a['id']})")
+
+        return "\n".join(output)
 
     except requests.exceptions.RequestException as e:
         return f"API Error: {str(e)}"
@@ -568,38 +899,98 @@ def get_library_artists() -> str:
 
 
 @mcp.tool()
-def get_library_songs(limit: int = 50) -> str:
+def get_library_songs(limit: int = 100) -> str:
     """
     Get songs from your Apple Music library (not a search, just browse).
 
     Args:
-        limit: Number of songs to return (default 50, max 100)
+        limit: Number of songs to return (default 100, use 0 for all songs)
 
-    Returns: List of songs with library IDs
+    Returns: Song count, CSV file path, and song listing
     """
     try:
         headers = get_headers()
-        response = requests.get(
-            f"{BASE_URL}/me/library/songs",
-            headers=headers,
-            params={"limit": min(limit, 100)},
-        )
-        response.raise_for_status()
-        data = response.json()
+        all_songs = []
+        offset = 0
+        fetch_all = limit == 0
+        max_to_fetch = limit if not fetch_all else float('inf')
 
-        output = []
-        for song in data.get("data", []):
+        while len(all_songs) < max_to_fetch:
+            batch_limit = 100 if fetch_all else min(100, max_to_fetch - len(all_songs))
+            response = requests.get(
+                f"{BASE_URL}/me/library/songs",
+                headers=headers,
+                params={"limit": batch_limit, "offset": offset},
+            )
+            if response.status_code == 404:
+                break
+            response.raise_for_status()
+            songs = response.json().get("data", [])
+            if not songs:
+                break
+            all_songs.extend(songs)
+            if len(songs) < 100:
+                break
+            offset += 100
+
+        if not all_songs:
+            return "No songs in library"
+
+        # Extract full song data
+        song_data = []
+        for song in all_songs:
             attrs = song.get("attributes", {})
-            name = attrs.get("name", "Unknown")
-            artist = attrs.get("artistName", "Unknown")
-            album = attrs.get("albumName", "")
-            song_id = song.get("id")
-            if album:
-                output.append(f"{name} - {artist} ({album}) [library ID: {song_id}]")
-            else:
-                output.append(f"{name} - {artist} [library ID: {song_id}]")
+            play_params = attrs.get("playParams", {})
+            genres = attrs.get("genreNames", [])
 
-        return "\n".join(output) if output else "No songs in library"
+            song_data.append({
+                "id": song.get("id", ""),
+                "catalog_id": play_params.get("catalogId", ""),
+                "name": attrs.get("name", ""),
+                "artist": attrs.get("artistName", ""),
+                "album": attrs.get("albumName", ""),
+                "duration_ms": attrs.get("durationInMillis", 0),
+                "duration": format_duration(attrs.get("durationInMillis", 0)),
+                "track_number": attrs.get("trackNumber", ""),
+                "disc_number": attrs.get("discNumber", ""),
+                "genre": genres[0] if genres else "",
+                "genres": ", ".join(genres),
+                "release_date": attrs.get("releaseDate", ""),
+                "has_lyrics": attrs.get("hasLyrics", False),
+                "artwork_url": attrs.get("artwork", {}).get("url", "").replace("{w}x{h}", "500x500"),
+            })
+
+        # Write CSV with full data
+        csv_path = get_cache_dir() / "library_songs.csv"
+        csv_fields = ["name", "duration", "artist", "album", "track_number", "disc_number",
+                      "release_date", "genre", "genres", "has_lyrics", "id", "catalog_id", "artwork_url"]
+
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=csv_fields)
+            writer.writeheader()
+            writer.writerows(song_data)
+
+        # Build output
+        count = len(song_data)
+        output = [f"=== {count} songs ===", f"Full data: {csv_path}", ""]
+
+        # Tiered display
+        if count <= 120:
+            for s in song_data:
+                year = s["release_date"][:4] if s["release_date"] else ""
+                year_str = f" [{year}]" if year else ""
+                output.append(f"{s['name']} ({s['duration']}) - {s['artist']} | {s['album']}{year_str} (ID: {s['id']})")
+        elif count <= 350:
+            for s in song_data:
+                name = s["name"][:45] + "..." if len(s["name"]) > 45 else s["name"]
+                artist = s["artist"][:25] + "..." if len(s["artist"]) > 25 else s["artist"]
+                output.append(f"{name} - {artist} ({s['id']})")
+        else:
+            for s in song_data:
+                name = s["name"][:30] + "..." if len(s["name"]) > 30 else s["name"]
+                output.append(f"{name} {s['id']}")
+
+        return "\n".join(output)
 
     except requests.exceptions.RequestException as e:
         return f"API Error: {str(e)}"

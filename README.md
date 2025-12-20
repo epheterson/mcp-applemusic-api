@@ -202,35 +202,15 @@ Ask Claude things like:
 
 ---
 
-## Tips & Hidden Features
+## Accessing Favorite Songs
 
-### Accessing Your Loved Songs
-
-Your "Favorite Songs" (loved songs) are available as a system playlist:
+Your loved songs are available as a read-only "Favorite Songs" playlist:
 ```
 get_library_playlists()  → Find "Favorite Songs (ID: p.XXX, read-only)"
 get_playlist_tracks("p.XXX")  → Get all your loved songs
 ```
 
-To add songs to favorites, use `rate_song(catalog_id, "love")`.
-
-### Replay Playlists
-
-Your annual Apple Music Replay playlists are accessible:
-```
-Replay 2024 (ID: p.XXX, read-only)
-Replay 2023 (ID: p.XXX, read-only)
-...
-```
-
-### Personalized Playlists
-
-Apple generates personalized playlists you can access:
-- **New Music** - Weekly personalized recommendations
-- **Chill** / **Get Up!** - Mood-based mixes
-- **[Artist] Essentials** - Auto-generated artist collections
-
-All system playlists are read-only but fully accessible via `get_playlist_tracks()`.
+To love a song, use `rate_song(catalog_id, "love")`.
 
 ---
 

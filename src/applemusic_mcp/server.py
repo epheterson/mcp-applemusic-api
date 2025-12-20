@@ -2689,8 +2689,9 @@ if APPLESCRIPT_AVAILABLE:
             if add_to_library:
                 add_ok, add_msg = _add_songs_to_library([catalog_id])
                 if add_ok:
-                    # Wait for sync, then play
-                    for attempt in range(15):
+                    # Wait for iCloud sync, then play (up to ~7 seconds)
+                    time.sleep(1)  # Initial delay for sync to start
+                    for attempt in range(30):
                         if attempt > 0:
                             time.sleep(0.2)
                         success, result = asc.play_track(song_name, song_artist)
@@ -2698,7 +2699,7 @@ if APPLESCRIPT_AVAILABLE:
                             if reveal:
                                 asc.reveal_track(song_name, song_artist)
                             return f"Added to library and playing: {song_name} by {song_artist}"
-                    return f"Added to library but couldn't play yet: {song_name} by {song_artist}"
+                    return f"Added to library but couldn't play yet: {song_name} by {song_artist}. Try again in a moment."
                 return f"Failed to add to library: {add_msg}"
 
             # Option 2: Just reveal in Music app

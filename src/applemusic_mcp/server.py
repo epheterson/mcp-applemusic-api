@@ -118,6 +118,13 @@ def _format_full(t: dict) -> str:
     return f"{t['name']} - {t['artist']} ({t['duration']}) {t['album']}{year_str}{genre_str} {t['id']}"
 
 
+def _format_clipped(t: dict) -> str:
+    """Clipped format: Truncated Name - Artist (duration) Album [Year] Genre id"""
+    year_str = f" [{t['year']}]" if t["year"] else ""
+    genre_str = f" {t['genre']}" if t["genre"] else ""
+    return f"{truncate(t['name'], 35)} - {truncate(t['artist'], 22)} ({t['duration']}) {truncate(t['album'], 30)}{year_str}{genre_str} {t['id']}"
+
+
 def _format_compact(t: dict) -> str:
     """Compact format: Name - Artist (duration) id"""
     return f"{truncate(t['name'], 40)} - {truncate(t['artist'], 25)} ({t['duration']}) {t['id']}"
@@ -128,41 +135,45 @@ def _format_minimal(t: dict) -> str:
     return f"{truncate(t['name'], 30)} - {truncate(t['artist'], 20)} {t['id']}"
 
 
-def format_track_list(track_data: list[dict]) -> list[str]:
+def format_track_list(track_data: list[dict]) -> tuple[list[str], str]:
     """Format track list with tiered display based on output size.
 
     Automatically selects the most detailed format that fits within MAX_OUTPUT_CHARS:
     - Full: Name - Artist (duration) Album [Year] Genre id
+    - Clipped: Same as Full but with truncated Name/Artist/Album
     - Compact: Truncated Name - Artist (duration) id
     - Minimal: Truncated Name - Artist id
-
-    The character count includes newline characters between lines to accurately
-    estimate the final output size.
 
     Args:
         track_data: List of track dicts from extract_track_data().
 
     Returns:
-        List of formatted strings, one per track.
+        Tuple of (list of formatted strings, tier_name) where tier_name is
+        "Full", "Clipped", "Compact", or "Minimal".
     """
     if not track_data:
-        return []
+        return [], "Full"
+
+    def char_count(lines: list[str]) -> int:
+        return sum(len(line) for line in lines) + max(0, len(lines) - 1)
 
     # Try full format first
-    # Include newline overhead: each line except the last adds 1 char for \n
     full_output = [_format_full(t) for t in track_data]
-    full_char_count = sum(len(line) for line in full_output) + max(0, len(full_output) - 1)
-    if full_char_count <= MAX_OUTPUT_CHARS:
-        return full_output
+    if char_count(full_output) <= MAX_OUTPUT_CHARS:
+        return full_output, "Full"
 
-    # Fall back to compact
+    # Try clipped (truncated but keeps all fields)
+    clipped_output = [_format_clipped(t) for t in track_data]
+    if char_count(clipped_output) <= MAX_OUTPUT_CHARS:
+        return clipped_output, "Clipped"
+
+    # Fall back to compact (drops album/year/genre)
     compact_output = [_format_compact(t) for t in track_data]
-    compact_char_count = sum(len(line) for line in compact_output) + max(0, len(compact_output) - 1)
-    if compact_char_count <= MAX_OUTPUT_CHARS:
-        return compact_output
+    if char_count(compact_output) <= MAX_OUTPUT_CHARS:
+        return compact_output, "Compact"
 
     # Fall back to minimal
-    return [_format_minimal(t) for t in track_data]
+    return [_format_minimal(t) for t in track_data], "Minimal"
 
 
 BASE_URL = "https://api.music.apple.com/v1"
@@ -335,8 +346,9 @@ def get_playlist_tracks(playlist_id: str, include_extras: bool = False) -> str:
 
         # Build output
         count = len(track_data)
-        output = [f"=== {count} tracks ===", f"Full data: {csv_path}", ""]
-        output.extend(format_track_list(track_data))
+        formatted_lines, tier = format_track_list(track_data)
+        output = [f"=== {count} tracks ({tier} format) ===", f"Full data: {csv_path}", ""]
+        output.extend(formatted_lines)
 
         return "\n".join(output)
 
@@ -525,8 +537,9 @@ def search_library(query: str, limit: int = 25, include_extras: bool = False) ->
 
         # Build output
         count = len(song_data)
-        output = [f"=== {count} results for '{query}' ===", f"Full data: {csv_path}", ""]
-        output.extend(format_track_list(song_data))
+        formatted_lines, tier = format_track_list(song_data)
+        output = [f"=== {count} results for '{query}' ({tier} format) ===", f"Full data: {csv_path}", ""]
+        output.extend(formatted_lines)
 
         return "\n".join(output)
 
@@ -617,8 +630,9 @@ def get_recently_played(limit: int = 30, include_extras: bool = False) -> str:
 
         # Build output
         count = len(track_data)
-        output = [f"=== {count} recently played tracks ===", f"Full data: {csv_path}", ""]
-        output.extend(format_track_list(track_data))
+        formatted_lines, tier = format_track_list(track_data)
+        output = [f"=== {count} recently played tracks ({tier} format) ===", f"Full data: {csv_path}", ""]
+        output.extend(formatted_lines)
 
         return "\n".join(output)
 
@@ -1012,8 +1026,9 @@ def get_library_songs(limit: int = 100, include_extras: bool = False) -> str:
 
         # Build output
         count = len(song_data)
-        output = [f"=== {count} songs ===", f"Full data: {csv_path}", ""]
-        output.extend(format_track_list(song_data))
+        formatted_lines, tier = format_track_list(song_data)
+        output = [f"=== {count} songs ({tier} format) ===", f"Full data: {csv_path}", ""]
+        output.extend(formatted_lines)
 
         return "\n".join(output)
 

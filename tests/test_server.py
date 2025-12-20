@@ -463,7 +463,7 @@ class TestFormatTrackList:
     """Tests for format_track_list helper function."""
 
     def test_full_format_for_small_lists(self):
-        """Should use full format for <= 150 tracks."""
+        """Should use full format for small track lists."""
         tracks = [{
             "name": "Song Name",
             "artist": "Artist Name",
@@ -473,36 +473,35 @@ class TestFormatTrackList:
             "genre": "Rock",
             "id": "123"
         }]
-        result = server.format_track_list(tracks)
+        lines, tier = server.format_track_list(tracks)
 
-        assert len(result) == 1
-        assert "Song Name - Artist Name (3:45) Album Name [2024] Rock 123" == result[0]
+        assert tier == "Full"
+        assert len(lines) == 1
+        assert "Song Name - Artist Name (3:45) Album Name [2024] Rock 123" == lines[0]
 
-    def test_compact_format_when_full_exceeds_limit(self):
-        """Should use compact format when full format exceeds MAX_OUTPUT_CHARS."""
-        # Create tracks with long names/albums to exceed 50K char limit in full format
+    def test_clipped_format_when_full_exceeds_limit(self):
+        """Should use clipped format when full format exceeds MAX_OUTPUT_CHARS."""
         track = {
-            "name": "A" * 100,  # Long name
-            "artist": "B" * 50,  # Long artist
+            "name": "A" * 100,
+            "artist": "B" * 50,
             "duration": "3:00",
-            "album": "C" * 100,  # Long album
+            "album": "C" * 100,
             "year": "2024",
             "genre": "Rock",
             "id": "12345678901234567890"
         }
-        # ~300 chars per line in full format * 200 tracks = 60K chars > 50K limit
         tracks = [track] * 200
-        result = server.format_track_list(tracks)
+        lines, tier = server.format_track_list(tracks)
 
-        assert len(result) == 200
-        # Check truncation occurred (compact format truncates names)
-        assert "..." in result[0]
-        # Album should NOT be in compact format
-        assert "C" * 100 not in result[0]
+        assert tier == "Clipped"
+        assert len(lines) == 200
+        assert "..." in lines[0]  # Truncated
+        assert "C" * 100 not in lines[0]  # Album truncated
+        assert "[2024]" in lines[0]  # Year still present
+        assert "Rock" in lines[0]  # Genre still present
 
-    def test_minimal_format_when_compact_exceeds_limit(self):
-        """Should use minimal format when compact format also exceeds limit."""
-        # Create enough tracks that even compact format exceeds limit
+    def test_compact_format_when_clipped_exceeds_limit(self):
+        """Should use compact format when clipped format exceeds MAX_OUTPUT_CHARS."""
         track = {
             "name": "A" * 50,
             "artist": "B" * 30,
@@ -512,13 +511,32 @@ class TestFormatTrackList:
             "genre": "Rock",
             "id": "12345678901234567890"
         }
-        # ~90 chars per compact line * 600 tracks = 54K chars > 50K limit
-        tracks = [track] * 600
-        result = server.format_track_list(tracks)
+        tracks = [track] * 450
+        lines, tier = server.format_track_list(tracks)
 
-        assert len(result) == 600
-        # Minimal format should not include duration
-        assert "(3:00)" not in result[0]
+        assert tier == "Compact"
+        assert len(lines) == 450
+        assert "Album" not in lines[0]  # Album dropped
+        assert "[2024]" not in lines[0]  # Year dropped
+        assert "(3:00)" in lines[0]  # Duration still present
+
+    def test_minimal_format_when_compact_exceeds_limit(self):
+        """Should use minimal format when compact format also exceeds limit."""
+        track = {
+            "name": "A" * 50,
+            "artist": "B" * 30,
+            "duration": "3:00",
+            "album": "Album",
+            "year": "2024",
+            "genre": "Rock",
+            "id": "12345678901234567890"
+        }
+        tracks = [track] * 800
+        lines, tier = server.format_track_list(tracks)
+
+        assert tier == "Minimal"
+        assert len(lines) == 800
+        assert "(3:00)" not in lines[0]
 
     def test_handles_empty_optional_fields(self):
         """Should handle tracks with empty year/genre gracefully."""
@@ -531,7 +549,14 @@ class TestFormatTrackList:
             "genre": "",
             "id": "123"
         }]
-        result = server.format_track_list(tracks)
+        lines, tier = server.format_track_list(tracks)
 
-        assert "[" not in result[0]  # No year brackets
-        assert result[0] == "Song - Artist (3:00) Album 123"
+        assert tier == "Full"
+        assert "[" not in lines[0]
+        assert lines[0] == "Song - Artist (3:00) Album 123"
+
+    def test_returns_empty_for_no_tracks(self):
+        """Should handle empty track list."""
+        lines, tier = server.format_track_list([])
+        assert tier == "Full"
+        assert lines == []

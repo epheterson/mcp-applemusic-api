@@ -11,11 +11,11 @@ MCP server for Apple Music - manage playlists, control playback, browse your lib
 | Create playlists, add tracks | ✅ | ✅ |
 | Recommendations, charts, radio | ✅ | ✅ |
 | Browse albums, artists, songs | ✅ | ✅ |
-| **Play/pause/skip/seek** | ✅ | ❌ |
-| **Volume/shuffle/repeat** | ✅ | ❌ |
-| **Remove tracks from playlists** | ✅ | ❌ |
-| **Delete playlists** | ✅ | ❌ |
-| **Edit ANY playlist** | ✅ | ❌ |
+| Play/pause/skip/seek | ✅ | ❌ |
+| Volume/shuffle/repeat | ✅ | ❌ |
+| Remove tracks from playlists | ✅ | ❌ |
+| Delete playlists | ✅ | ❌ |
+| Edit ANY playlist | ✅ | ❌ |
 
 On macOS, AppleScript removes most API limitations - edit or delete *any* playlist, not just API-created ones.
 
@@ -93,64 +93,89 @@ Ask Claude things like:
 
 ---
 
-## Tools (33 cross-platform + 18 macOS-only)
+## Tools (52 total)
+
+*macOS = requires Mac with Music app*
 
 ### Playlists
 | Tool | Description |
 |------|-------------|
-| `get_library_playlists` | List all playlists with IDs and edit status |
-| `get_playlist_tracks` | Get all tracks in a playlist |
+| `get_library_playlists` | List all playlists |
+| `get_playlist_tracks` | Get tracks (by ID or name*) with filter/limit |
 | `create_playlist` | Create new playlist |
-| `add_to_playlist` | Add tracks to playlist |
-| `copy_playlist` | Copy to editable playlist |
+| `add_to_playlist` | Smart add: auto-adds to library, skips duplicates, verifies |
+| `copy_playlist` | Copy playlist to editable version |
+| `remove_from_playlist` | Remove track *(macOS)* |
+| `delete_playlist` | Delete playlist *(macOS)* |
+
+*By name requires macOS. With names, can edit ANY playlist.
+
+`add_to_playlist` accepts catalog IDs (auto-adds to library first) or library IDs. Duplicate checking is on by default.
 
 ### Library
 | Tool | Description |
 |------|-------------|
-| `search_library` | Search your library → library IDs |
-| `get_library_songs` | List songs in library |
-| `get_library_albums` | List albums in library |
-| `get_library_artists` | List artists in library |
-| `get_album_tracks` | Get tracks from an album |
+| `search_library` | Search your library (API) |
+| `local_search_library` | Search your library *(macOS)* |
+| `get_library_songs` | List songs |
+| `get_library_albums` | List albums |
+| `get_library_artists` | List artists |
+| `get_library_music_videos` | List music videos |
+| `get_album_tracks` | Get tracks from album |
 | `get_recently_played` | Recent listening history |
 | `get_recently_added` | Recently added content |
-| `add_to_library` | Add catalog song to library |
-| `rate_song` | Love or dislike a song |
+| `add_to_library` | Add song from catalog |
+| `rate_song` | Love or dislike (API) |
+| `love_track` | Mark as loved *(macOS)* |
+| `dislike_track` | Mark as disliked *(macOS)* |
+| `get_track_rating` | Get star rating *(macOS)* |
+| `set_track_rating` | Set star rating *(macOS)* |
 
 ### Catalog & Discovery
 | Tool | Description |
 |------|-------------|
-| `search_catalog` | Search Apple Music → catalog IDs |
-| `get_song_details` | Full details for a song |
+| `search_catalog` | Search Apple Music |
+| `get_song_details` | Full song details |
 | `get_artist_details` | Artist info and discography |
 | `get_artist_top_songs` | Artist's popular songs |
 | `get_similar_artists` | Find similar artists |
 | `get_recommendations` | Personalized recommendations |
 | `get_heavy_rotation` | Your frequently played |
+| `get_personal_station` | Your personal radio station |
+| `get_song_station` | Radio station from a song |
 | `get_charts` | Top songs, albums, playlists |
 | `get_genres` | List all genres |
+| `get_storefronts` | List Apple Music regions |
+| `get_search_suggestions` | Autocomplete suggestions |
+| `get_music_videos` | Search music videos |
 
-### macOS Only (AppleScript)
+### Playback *(macOS)*
 | Tool | Description |
 |------|-------------|
-| `play_track` | Play specific track by name |
+| `play_track` | Play any track (library first, then catalog) |
 | `play_playlist` | Start playing a playlist |
 | `playback_control` | Play, pause, stop, next, previous |
 | `get_now_playing` | Current track info |
-| `set_volume` | Set volume (0-100) |
-| `set_shuffle` / `set_repeat` | Playback settings |
+| `get_player_state` | Get playing/paused/stopped state |
 | `seek_to_position` | Seek within current track |
-| `remove_from_playlist` | Remove track from playlist |
-| `delete_playlist` | Delete a playlist |
-| `get_track_rating` | Get star rating (0-5) |
-| `set_track_rating` | Set star rating (0-5) |
-| `get_airplay_devices` | List AirPlay devices |
+| `set_volume` | Set volume (0-100) |
+| `set_shuffle` | Toggle shuffle |
+| `set_repeat` | Set repeat mode (off, one, all) |
+| `get_volume_and_playback` | Get current settings |
+
+### Utilities
+| Tool | Description |
+|------|-------------|
+| `check_auth_status` | Verify tokens and connection |
+| `get_airplay_devices` | List AirPlay devices *(macOS)* |
+| `reveal_in_music` | Show track in Music app *(macOS)* |
+| `get_cache_info` | Show CSV cache info |
+| `clear_cache` | Clear cached exports |
 
 ### Output Format
 
 Track listings auto-select the best format that fits:
 - **Full**: Name - Artist (duration) Album [Year] Genre id
-- **Clipped**: Same but with truncated names
 - **Compact**: Name - Artist (duration) id
 - **Minimal**: Name - Artist id
 

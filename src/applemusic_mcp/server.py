@@ -309,16 +309,88 @@ def get_library_playlists() -> str:
 
 
 @mcp.tool()
-def get_playlist_tracks(playlist_id: str, include_extras: bool = False) -> str:
+def get_playlist_tracks(
+    playlist_id: str = "",
+    playlist_name: str = "",
+    filter: str = "",
+    limit: int = 0,
+    include_extras: bool = False,
+) -> str:
     """
-    Get all tracks in a playlist.
+    Get tracks in a playlist.
+
+    Provide EITHER playlist_id (API) OR playlist_name (AppleScript, macOS only).
 
     Args:
-        playlist_id: The playlist ID (get from get_library_playlists)
+        playlist_id: Playlist ID (from get_library_playlists)
+        playlist_name: Playlist name (macOS only, uses AppleScript)
+        filter: Filter tracks by name/artist (case-insensitive substring match)
+        limit: Max tracks to return (0 = all). Use with large playlists.
         include_extras: Include extra metadata in CSV (track/disc numbers, artwork, etc.)
 
     Returns: Track count, CSV file path, and track listing (tiered based on size)
     """
+    use_api = bool(playlist_id)
+    use_applescript = bool(playlist_name)
+
+    if use_api and use_applescript:
+        return "Error: Provide either playlist_id or playlist_name, not both"
+
+    if not use_api and not use_applescript:
+        return "Error: Provide playlist_id or playlist_name"
+
+    # Use AppleScript with name
+    if use_applescript:
+        if not APPLESCRIPT_AVAILABLE:
+            return "Error: AppleScript (playlist_name) requires macOS"
+        success, result = asc.get_playlist_tracks(playlist_name)
+        if not success:
+            return f"Error: {result}"
+        if not result:
+            return "Playlist is empty"
+
+        # Format AppleScript results
+        track_data = []
+        for t in result:
+            track_data.append({
+                "name": t.get("name", "Unknown"),
+                "artist": t.get("artist", "Unknown"),
+                "album": t.get("album", ""),
+                "duration": t.get("duration", "0:00"),
+                "genre": t.get("genre", ""),
+                "year": t.get("year", ""),
+                "id": t.get("id", ""),
+            })
+
+        # Write CSV (full data always)
+        safe_name = "".join(c if c.isalnum() else "_" for c in playlist_name)
+        csv_path = get_cache_dir() / f"playlist_{safe_name}.csv"
+        write_tracks_csv(track_data, csv_path, include_extras)
+        total_count = len(track_data)
+
+        # Apply filter
+        if filter:
+            filter_lower = filter.lower()
+            track_data = [
+                t for t in track_data
+                if filter_lower in t["name"].lower() or filter_lower in t["artist"].lower()
+            ]
+
+        # Apply limit
+        if limit > 0:
+            track_data = track_data[:limit]
+
+        count = len(track_data)
+        formatted_lines, tier = format_track_list(track_data)
+        header = f"=== {count} tracks"
+        if filter or limit:
+            header += f" (of {total_count} total)"
+        header += f" ({tier} format) ==="
+        output = [header, f"Full data: {csv_path}", ""]
+        output.extend(formatted_lines)
+        return "\n".join(output)
+
+    # Use API with ID
     try:
         headers = get_headers()
         all_tracks = []
@@ -348,14 +420,31 @@ def get_playlist_tracks(playlist_id: str, include_extras: bool = False) -> str:
         # Extract track data using helper
         track_data = [extract_track_data(t, include_extras) for t in all_tracks]
 
-        # Write CSV using helper
+        # Write CSV using helper (full data always)
         csv_path = get_cache_dir() / f"playlist_{playlist_id.replace('.', '_')}.csv"
         write_tracks_csv(track_data, csv_path, include_extras)
+        total_count = len(track_data)
+
+        # Apply filter
+        if filter:
+            filter_lower = filter.lower()
+            track_data = [
+                t for t in track_data
+                if filter_lower in t["name"].lower() or filter_lower in t["artist"].lower()
+            ]
+
+        # Apply limit
+        if limit > 0:
+            track_data = track_data[:limit]
 
         # Build output
         count = len(track_data)
         formatted_lines, tier = format_track_list(track_data)
-        output = [f"=== {count} tracks ({tier} format) ===", f"Full data: {csv_path}", ""]
+        header = f"=== {count} tracks"
+        if filter or limit:
+            header += f" (of {total_count} total)"
+        header += f" ({tier} format) ==="
+        output = [header, f"Full data: {csv_path}", ""]
         output.extend(formatted_lines)
 
         return "\n".join(output)
@@ -364,6 +453,65 @@ def get_playlist_tracks(playlist_id: str, include_extras: bool = False) -> str:
         return f"API Error: {str(e)}"
     except (FileNotFoundError, ValueError) as e:
         return str(e)
+
+
+def _is_catalog_id(track_id: str) -> bool:
+    """Check if an ID is a catalog ID (numeric) vs library ID (hex/prefixed)."""
+    return track_id.isdigit()
+
+
+def _get_playlist_track_names(playlist_id: str) -> tuple[bool, list[dict] | str]:
+    """Get track names from a playlist for duplicate checking."""
+    try:
+        headers = get_headers()
+        all_tracks = []
+        offset = 0
+
+        while True:
+            response = requests.get(
+                f"{BASE_URL}/me/library/playlists/{playlist_id}/tracks",
+                headers=headers,
+                params={"limit": 100, "offset": offset},
+            )
+            if response.status_code == 404:
+                break
+            response.raise_for_status()
+            tracks = response.json().get("data", [])
+            if not tracks:
+                break
+            all_tracks.extend(tracks)
+            if len(tracks) < 100:
+                break
+            offset += 100
+
+        return True, [
+            {
+                "name": t.get("attributes", {}).get("name", ""),
+                "artist": t.get("attributes", {}).get("artistName", ""),
+            }
+            for t in all_tracks
+        ]
+    except Exception as e:
+        return False, str(e)
+
+
+def _find_track_in_list(
+    tracks: list[dict], track_name: str, artist: str = ""
+) -> list[str]:
+    """Find matching tracks in a list by name/artist."""
+    track_lower = track_name.lower()
+    artist_lower = artist.lower() if artist else ""
+    matches = []
+
+    for t in tracks:
+        if track_lower in t["name"].lower():
+            if artist_lower:
+                if artist_lower in t["artist"].lower():
+                    matches.append(f"{t['name']} - {t['artist']}")
+            else:
+                matches.append(f"{t['name']} - {t['artist']}")
+
+    return matches
 
 
 @mcp.tool()
@@ -399,26 +547,195 @@ def create_playlist(name: str, description: str = "") -> str:
 
 
 @mcp.tool()
-def add_to_playlist(playlist_id: str, song_ids: str) -> str:
+def add_to_playlist(
+    playlist_id: str = "",
+    track_ids: str = "",
+    playlist_name: str = "",
+    track_name: str = "",
+    artist: str = "",
+    allow_duplicates: bool = False,
+    verify: bool = True,
+) -> str:
     """
-    Add songs to a library playlist.
-    Only works for playlists created via API (editable=true).
+    Add songs to a playlist with smart handling.
+
+    Automatically:
+    - Adds catalog songs to library first if needed
+    - Checks for duplicates (skips by default)
+    - Optionally verifies the add succeeded
+    - Works with ANY playlist on macOS via AppleScript
+
+    MODE 1 - By IDs (cross-platform):
+        add_to_playlist(playlist_id="p.ABC123", track_ids="1440783617")  # catalog ID
+        add_to_playlist(playlist_id="p.ABC123", track_ids="i.XYZ789")    # library ID
+
+    MODE 2 - By names (macOS only, works on ANY playlist):
+        add_to_playlist(playlist_name="Road Trip", track_name="Hey Jude", artist="The Beatles")
 
     Args:
-        playlist_id: The playlist ID (get from get_library_playlists)
-        song_ids: Comma-separated LIBRARY song IDs (get from search_library, NOT catalog IDs)
+        playlist_id: Playlist ID (from get_library_playlists)
+        track_ids: Track IDs - accepts catalog IDs (numeric) or library IDs
+        playlist_name: Playlist name (macOS only, uses AppleScript)
+        track_name: Track name (macOS only)
+        artist: Artist name (optional, helps with matching)
+        allow_duplicates: If False (default), skip tracks already in playlist
+        verify: If True, verify track was added (slower but confirms success)
 
-    Returns: Confirmation or error message
+    Returns: Detailed result of what happened
     """
+    steps = []  # Track what we did for verbose output
+
+    # Determine which mode
+    use_api = bool(playlist_id)
+    use_applescript = bool(playlist_name and track_name)
+
+    if use_api and use_applescript:
+        return "Error: Provide either IDs or names, not both"
+
+    if not use_api and not use_applescript:
+        return "Error: Provide playlist_id + track_ids, or playlist_name + track_name"
+
+    # === MODE 2: AppleScript with names (macOS) ===
+    if use_applescript:
+        if not APPLESCRIPT_AVAILABLE:
+            return "Error: Name-based add requires macOS"
+
+        # Quick duplicate check
+        if not allow_duplicates:
+            success, exists = asc.track_exists_in_playlist(
+                playlist_name, track_name, artist if artist else None
+            )
+            if success and exists:
+                return f"Skipped: '{track_name}' already in playlist\n  Found: {exists}"
+
+        # Add the track
+        success, result = asc.add_track_to_playlist(
+            playlist_name, track_name, artist if artist else None
+        )
+        if not success:
+            return f"Error: {result}"
+        steps.append(result)
+
+        # Quick verify with polling
+        if verify:
+            import time
+            for _ in range(5):  # Try up to 5 times (0.5s total)
+                success, exists = asc.track_exists_in_playlist(
+                    playlist_name, track_name, artist if artist else None
+                )
+                if success and exists:
+                    steps.append(f"Verified: {exists}")
+                    break
+                time.sleep(0.1)
+            else:
+                steps.append("Warning: could not verify add")
+
+        return "\n".join(steps)
+
+    # === MODE 1: API with IDs ===
     try:
         headers = get_headers()
-
-        ids = [s.strip() for s in song_ids.split(",") if s.strip()]
+        ids = [s.strip() for s in track_ids.split(",") if s.strip()]
         if not ids:
-            return "No song IDs provided"
+            return "Error: No track IDs provided"
 
-        tracks = [{"id": sid, "type": "library-songs"} for sid in ids]
-        body = {"data": tracks}
+        library_ids = []
+        track_info = {}  # For verbose output
+
+        # Process each ID - add to library if catalog ID
+        for track_id in ids:
+            if _is_catalog_id(track_id):
+                # It's a catalog ID - need to add to library first
+                steps.append(f"Adding catalog ID {track_id} to library...")
+
+                # Add to library
+                params = {"ids[songs]": track_id}
+                response = requests.post(
+                    f"{BASE_URL}/me/library", headers=headers, params=params
+                )
+                if response.status_code not in (200, 202):
+                    steps.append(f"  Warning: library add returned {response.status_code}")
+
+                # Get catalog info for the track name
+                cat_response = requests.get(
+                    f"{BASE_URL}/catalog/us/songs/{track_id}",
+                    headers=headers,
+                )
+                if cat_response.status_code == 200:
+                    cat_data = cat_response.json().get("data", [])
+                    if cat_data:
+                        attrs = cat_data[0].get("attributes", {})
+                        name = attrs.get("name", "")
+                        artist_name = attrs.get("artistName", "")
+                        track_info[track_id] = f"{name} - {artist_name}"
+
+                        # Poll library until track appears (up to 1s)
+                        import time
+                        found_id = None
+                        for attempt in range(10):
+                            if attempt > 0:
+                                time.sleep(0.1)
+                            lib_response = requests.get(
+                                f"{BASE_URL}/me/library/search",
+                                headers=headers,
+                                params={"term": name, "types": "library-songs", "limit": 25},
+                            )
+                            if lib_response.status_code == 200:
+                                lib_data = lib_response.json()
+                                songs = lib_data.get("results", {}).get("library-songs", {}).get("data", [])
+                                for song in songs:
+                                    song_attrs = song.get("attributes", {})
+                                    if (song_attrs.get("name", "").lower() == name.lower() and
+                                        artist_name.lower() in song_attrs.get("artistName", "").lower()):
+                                        found_id = song["id"]
+                                        break
+                                if found_id:
+                                    break
+                        if found_id:
+                            library_ids.append(found_id)
+                            steps.append(f"  Found in library: {name} (ID: {found_id})")
+                        else:
+                            steps.append(f"  Warning: could not find '{name}' in library after adding")
+                else:
+                    steps.append(f"  Warning: could not get catalog info for {track_id}")
+            else:
+                # Already a library ID
+                library_ids.append(track_id)
+
+        if not library_ids:
+            return "Error: No valid library IDs to add\n" + "\n".join(steps)
+
+        # Check for duplicates
+        if not allow_duplicates:
+            success, existing = _get_playlist_track_names(playlist_id)
+            if success and existing:
+                filtered_ids = []
+                for lib_id in library_ids:
+                    # Get track name for this library ID
+                    response = requests.get(
+                        f"{BASE_URL}/me/library/songs/{lib_id}",
+                        headers=headers,
+                    )
+                    if response.status_code == 200:
+                        data = response.json().get("data", [])
+                        if data:
+                            attrs = data[0].get("attributes", {})
+                            name = attrs.get("name", "")
+                            artist_name = attrs.get("artistName", "")
+                            matches = _find_track_in_list(existing, name, artist_name)
+                            if matches:
+                                steps.append(f"Skipped duplicate: {name} - {artist_name}")
+                                continue
+                    filtered_ids.append(lib_id)
+                library_ids = filtered_ids
+
+        if not library_ids:
+            steps.append("All tracks already in playlist")
+            return "\n".join(steps)
+
+        # Add to playlist
+        track_data = [{"id": lid, "type": "library-songs"} for lid in library_ids]
+        body = {"data": track_data}
 
         response = requests.post(
             f"{BASE_URL}/me/library/playlists/{playlist_id}/tracks",
@@ -427,19 +744,25 @@ def add_to_playlist(playlist_id: str, song_ids: str) -> str:
         )
 
         if response.status_code == 204:
-            return f"Successfully added {len(ids)} track(s) to playlist"
+            steps.append(f"Added {len(library_ids)} track(s) to playlist")
         elif response.status_code == 403:
-            return "Error: Cannot edit this playlist (not API-created or permission denied)"
+            return "Error: Cannot edit this playlist (not API-created). Use playlist_name on macOS.\n" + "\n".join(steps)
         elif response.status_code == 500:
-            return "Error: Cannot edit this playlist (likely not API-created)"
+            return "Error: Cannot edit this playlist (not API-created). Use playlist_name on macOS.\n" + "\n".join(steps)
         else:
             response.raise_for_status()
-            return f"Added tracks (status: {response.status_code})"
+
+        # Verify
+        success, updated = _get_playlist_track_names(playlist_id)
+        if success:
+            steps.append(f"Verified: playlist now has {len(updated)} tracks")
+
+        return "\n".join(steps)
 
     except requests.exceptions.RequestException as e:
-        return f"API Error: {str(e)}"
+        return f"API Error: {str(e)}\n" + "\n".join(steps)
     except (FileNotFoundError, ValueError) as e:
-        return str(e)
+        return f"Error: {str(e)}\n" + "\n".join(steps)
 
 
 @mcp.tool()
@@ -2135,7 +2458,10 @@ if APPLESCRIPT_AVAILABLE:
 
     @mcp.tool()
     def play_track(track_name: str, artist: str = "") -> str:
-        """Play a specific track from your library (macOS only).
+        """Play a specific track (macOS only).
+
+        First tries your library, then searches Apple Music catalog.
+        Can play ANY song from the catalog without adding to library.
 
         Args:
             track_name: Name of the track to play (can be partial match)
@@ -2143,10 +2469,43 @@ if APPLESCRIPT_AVAILABLE:
 
         Returns: Confirmation message or error
         """
+        # Try library first
         success, result = asc.play_track(track_name, artist if artist else None)
         if success:
             return result
-        return f"Error: {result}"
+
+        # Fallback to catalog search
+        try:
+            headers = get_headers()
+            search_term = f"{track_name} {artist}".strip() if artist else track_name
+            response = requests.get(
+                f"{BASE_URL}/catalog/us/search",
+                headers=headers,
+                params={"term": search_term, "types": "songs", "limit": 5},
+            )
+            if response.status_code == 200:
+                data = response.json()
+                songs = data.get("results", {}).get("songs", {}).get("data", [])
+                if songs:
+                    # Find best match
+                    for song in songs:
+                        attrs = song.get("attributes", {})
+                        song_name = attrs.get("name", "")
+                        song_artist = attrs.get("artistName", "")
+                        # Check if it's a reasonable match
+                        if track_name.lower() in song_name.lower():
+                            if not artist or artist.lower() in song_artist.lower():
+                                catalog_id = song.get("id")
+                                success, result = asc.play_catalog_track(
+                                    catalog_id, song_name, song_artist
+                                )
+                                if success:
+                                    return f"Playing from catalog: {song_name} by {song_artist}"
+                                return f"Error playing catalog track: {result}"
+        except Exception as e:
+            pass  # Fall through to error
+
+        return f"Error: Track not found in library or catalog: {track_name}"
 
     @mcp.tool()
     def play_playlist(playlist_name: str, shuffle: bool = False) -> str:
@@ -2314,6 +2673,17 @@ if APPLESCRIPT_AVAILABLE:
         if success:
             return result
         return f"Error: {result}"
+
+    @mcp.tool()
+    def get_player_state() -> str:
+        """Get current player state (macOS only).
+
+        Returns: 'playing', 'paused', or 'stopped'
+        """
+        success, state = asc.get_player_state()
+        if success:
+            return f"Player state: {state}"
+        return f"Error: {state}"
 
     @mcp.tool()
     def delete_playlist(playlist_name: str) -> str:

@@ -1,5 +1,5 @@
 Apple Music MCP Integration Test
-Started: 2025-12-19T23:22:11.979343
+Started: 2025-12-20T10:36:39.840401
 
 
 ============================================================
@@ -39,14 +39,14 @@ By The Numbers (ID: p.Epa5IoL8oxe, editable, ...
 TEST: get_playlist_tracks
 ============================================================
 Result preview:
-=== 44 tracks ===
+=== 44 tracks (Full format) ===
 Full data: /Users/elp/.cache/applemusic-mcp/playlist_p_9YMaUlGQlbJ.csv
 
 A Bar Song (Tipsy) - Shaboozey (2:51) Where I've Been, Isn't Where I'm Going [2024] Country a.1737085899
 365 - Charli xcx (3:23) BRAT [2024] Electronic a.1739080656
 CHIHIRO - Billie Eilish (5:03) HIT ME HARD AND SOFT [2024] Alternative a.1739659141
 Love Me JeJe - Tems (2:58) Love Me JeJe - Single [2024] R&B/Soul a.1742653722
-i like the way you kiss me - Artemas (2:22) i like the way you kiss me - Single [20...
+i like the way you kiss me - Artemas (2:22) i like the way you kiss m...
 
   [PASS] Contains: tracks
   [PASS] Contains: Full data:
@@ -57,7 +57,7 @@ i like the way you kiss me - Artemas (2:22) i like the way you kiss me - Single 
 TEST: get_library_songs (limit=10)
 ============================================================
 Result preview:
-=== 10 songs ===
+=== 10 songs (Full format) ===
 Full data: /Users/elp/.cache/applemusic-mcp/library_songs.csv
 
 A a a a a Very Good Song (Silent Track) - Samir Mezrahi (9:58) A a a a a Very Good Song (Silent Track) - Single [2017] Pop i.GXJEJt98l9O2
@@ -65,7 +65,7 @@ A.T.H.F. - Danger Doom (3:05) The Mouse & The Mask Hip Hop i.R8XotZeGZ3W
 A0001 - Thursday (0:36) Full Collapse Other i.e1RBSJbEJ1W
 A8 - Black Eyed Peas (3:52) Behind The Front Hip-Hop i.4Y57WCDYqDLd
 AA XXX - Peaches (4:30) The Teaches Of Peaches i.4YrYVtDYqDLd
-Aaron Burr, Sir - Lin...
+Aaron B...
 
   [PASS] Contains: songs
   [PASS] Contains: Full data:
@@ -139,14 +139,14 @@ AGK (r....
 TEST: search_library ('love')
 ============================================================
 Result preview:
-=== 5 results for 'love' ===
-Full data: /Users/elp/.cache/applemusic-mcp/search_library_love_20251219_232240.csv
+=== 5 results for 'love' (Full format) ===
+Full data: /Users/elp/.cache/applemusic-mcp/search_library_love_20251220_103706.csv
 
 She Comes In Colors - Love (2:46) Da Capo [1966] Rock i.GXR0af98l9O2
 Grace (Anxiety) - Louderbach (6:43) Enemy Love [2006] Electronic i.X6zF2Mo219
 Chocolate Legs - Eric Benét (4:28) Love & Life [2008] R&B/Soul i.GXkD1S98l9O2
 Just the Two of Us (feat. Bill Withers) - Grover Washington, Jr. (7:18) Love Songs [1980] Jazz i.4lJYmfDYqDLd
-Mad Love - Infinity Song (3:00) Mad Love [2020] R&B...
+Mad Love - Infinity Song (3:00) Mad L...
 
   [PASS] Contains: results
   [PASS] Contains: Full data:
@@ -157,13 +157,13 @@ TEST: search_catalog ('Beatles')
 ============================================================
 Result preview:
 === 5 Songs (use add_to_library with these IDs) ===
-Full data: /Users/elp/.cache/applemusic-mcp/search_catalog_Beatles_20251219_232240.csv
+Full data: /Users/elp/.cache/applemusic-mcp/search_catalog_Beatles_20251220_103707.csv
 
-Yesterday - The Beatles (2:05) Help! [1965] Rock 1441164805
 In My Life - The Beatles (2:26) Rubber Soul [1965] Rock 1441164829
+Yesterday - The Beatles (2:05) Help! [1965] Rock 1441164805
 Here Comes the Sun - The Beatles (3:05) Abbey Road (Remastered) [1969] Rock 1441164589
 Hey Jude - The Beatles (7:11) The Beatles 1967-1970 (The Blue Album) [1968] Rock 1441133277
-Let It Be - The Beatles (4:03) Let It Be [1970] Rock 1...
+Come Together - The Beatles (4:18) Abbey Road (Remaste...
 
   [PASS] Contains: Songs
   [PASS] Contains: Full data:
@@ -173,14 +173,14 @@ Let It Be - The Beatles (4:03) Let It Be [1970] Rock 1...
 TEST: get_recently_played
 ============================================================
 Result preview:
-=== 5 recently played tracks ===
+=== 5 recently played tracks (Full format) ===
 Full data: /Users/elp/.cache/applemusic-mcp/recently_played.csv
 
-Oak Processionary - Most Every Day (2:41) Lichen Button - EP [2024] Electronic 1758079821
-softly spoken - Bcalm & Shalimar (2:33) softly spoken - Single [2024] Hip-Hop/Rap 1783197272
-White Lotus - Casiio & Sleepermane (2:11) White Lotus - Single [2025] Hip-Hop/Rap 1768562198
-hidden glow - tonbo (1:58) hidden glow - Single [2025] Hip-Hop/Rap 1818009248
-Lily Pad - olea (2:27) Lily Pad - Single [2024] ...
+gravity fAlls - erwOn (2:25) emerald CiTy - EP [2022] Hip-Hop/Rap 1647190291
+Every Little Thing She Does Is Magic - The Police (4:20) The Very Best of Sting & The Police [1981] Rock 1440883284
+Thursday - Noni (1:55) Thursday - Single [2025] Hip-Hop/Rap 1823843319
+I Won't Back Down - Tom Petty (2:55) Full Moon Fever [1989] Rock 1440825623
+Moving On - Dontcry & cxlt. (2:21) Moving On - S...
 
   [PASS] Contains: recently played
   [PASS] Contains: Full data:
@@ -193,11 +193,11 @@ Result preview:
 === 10 recently added items ===
 Full data: /Users/elp/.cache/applemusic-mcp/recently_added.csv
 
+__TEST_PLAYLIST__ (playlists) [added 2025-12-20] [ID: p.0qo8haBlamO]
 (What's the Story) Morning Glory? - Oasis (1 tracks) (albums) [added 2025-12-19] [ID: l.ms2nB5]
 Very Necessary - Salt-N-Pepa (1 tracks) (albums) [added 2025-12-19] [ID: l.Vmrb5t7]
 The Bodyguard (Original Soundtrack Album) - Whitney Houston (1 tracks) (albums) [added 2025-12-19] [ID: l.Gi1S6cl]
-🤟👶🎸 Jack & Norah (API) (playlists) [added 2025-12-19] [ID: p.NAaLHrZerg1]
-Total - Joy Division & New Order (1...
+Total - Joy Division & New Order (1 trac...
 
   [PASS] Contains: recently added
   [PASS] Contains: Full data:
@@ -207,17 +207,25 @@ Total - Joy Division & New Order (1...
 TEST: get_heavy_rotation
 ============================================================
 Result preview:
-API Error: 400 Client Error: Bad Request for url: https://api.music.apple.com/v1/me/history/heavy-rotation?limit=25
+=== 6 items in heavy rotation ===
+Full data: /Users/elp/.cache/applemusic-mcp/heavy_rotation.csv
 
-  [FAIL] Missing: heavy rotation
-  [FAIL] Missing: Full data:
-  [FAIL] Missing: .csv
+Bedtime Beats (playlists) [ID: p.9a9XclGQlbJ]
+Sublime (stations) [ID: ra.a-63480]
+Hamilton (Original Broadway Cast Recording) - Lin-Manuel Miranda, Leslie Odom, Jr., Phillipa Soo, Daveed Diggs & Christopher Jackson (46 tracks) [2015] (albums) [ID: l.CL0JRBn]
+The Beatles (stations) [ID: ra.a-136975]
+🤟👶🎸 Jack & Norah (playlists) [ID: p.7WZQu45r4dR]
+Today’s Easy Hits (playlists) [ID: pl.3a85cc83130443b...
+
+  [PASS] Contains: heavy rotation
+  [PASS] Contains: Full data:
+  [PASS] Contains: .csv
 
 ============================================================
 TEST: get_recommendations
 ============================================================
 Result preview:
-=== 77 recommendations ===
+=== 69 recommendations ===
 Full data: /Users/elp/.cache/applemusic-mcp/recommendations.csv
 === Made for You ===
   New Music  (playlists) [ID: pl.pm-20e9f373919da0807d875aeac4a5ec05]
@@ -236,14 +244,14 @@ Full data: /Users/elp/.cache/applemusic-mcp/recommendations.csv
 TEST: get_song_details
 ============================================================
 Result preview:
-Title: Yesterday
+Title: In My Life
 Artist: The Beatles
-Album: Help!
+Album: Rubber Soul
 Genre: Rock, Music
-Duration: 2:05
-Release Date: 1965-08-06
+Duration: 2:26
+Release Date: 1965-12-03
 Explicit: No
-ISRC: GBAYE0601477
+ISRC: GBAYE0601489
 
   [PASS] Contains: Title:
   [PASS] Contains: Artist:
@@ -313,12 +321,13 @@ Result preview:
   3. Underneath the Tree - Kelly Clarkson
   4. Jingle Bell Rock - Bobby Helms
   5. Choosin' Texas - Ella Langley
-  6. Rockin' Around the Christmas Tree (Single) - Brenda Lee
-  7. Last Christmas (Single Version) - Wham!
-  8. Sleigh Ride - The Ronettes
-  9. The Christmas Song (Merry Christmas to You) - Nat "King" Cole
+  6. Last Christmas (Single Version) - Wham!
+  7. Rockin' Around the Christmas Tree (Single) - Brenda Lee
+  8. The Fate of Ophelia - Taylor Swift
+  9. Sleigh Ride - The Ronettes
   10. It's the Most Wonderful Time of the Year - Andy Williams
-  11. Let It Snow! Let It...
+  11. Folded - Kehlani
+  12. The Christmas Song (Mer...
 
   [PASS] Contains: ===
 
@@ -367,18 +376,19 @@ TEST: get_cache_info
 ============================================================
 Result preview:
 === Cache: /Users/elp/.cache/applemusic-mcp ===
-Total: 26 files, 656.1 KB
+Total: 102 files, 656.8 KB
 
-search_catalog_Let_It_Be_20251219_232243.csv (79B, 0h ago)
-search_library_Wonderwall_20251219_232243.csv (106B, 0h ago)
-library_playlists.csv (162B, 0h ago)
 recommendations.csv (6KB, 0h ago)
+heavy_rotation.csv (2KB, 0h ago)
 recently_added.csv (3KB, 0h ago)
-recently_played.csv (442B, 0h ago)
-search_catalog_Beatles_20251219_232240.csv (387B, 0h ago)
-search_library_love_20251219_232240.csv (427B, 0h ago)
+recently_played.csv (441B, 0h ago)
+search_catalog_Beatles_20251220_103707.csv (405B, 0h ago)
+search_library_love_20251220_103706.csv (427B, 0h ago)
 library_artists.csv (26KB, 0h ago)
-album_l_hsreRMb.cs...
+album_l_hsreRMb.csv (175B, 0h ago)
+library_albums.csv (491KB, 0h ago)
+library_songs.csv (935B, 0h ago)
+playlist_p_9YMaUlGQlbJ.csv (4KB, 0h ag...
 
   [PASS] Contains: Cache:
   [PASS] Contains: .csv
@@ -387,7 +397,7 @@ album_l_hsreRMb.cs...
 TEST: create_playlist
 ============================================================
 Result preview:
-Created playlist '__TEST_PLAYLIST__' (ID: p.NAORFrZerg1)
+Created playlist '__TEST_PLAYLIST__' (ID: p.xVd1iEpKE5A)
 
   [PASS] Contains: Created
   [PASS] Contains: __TEST_PLAYLIST__
@@ -397,19 +407,20 @@ Created playlist '__TEST_PLAYLIST__' (ID: p.NAORFrZerg1)
 TEST: add_to_playlist
 ============================================================
 Result preview:
-Successfully added 1 track(s) to playlist
+Added 1 track(s) to playlist
+Verified: playlist now has 1 tracks
 
-  [PASS] Contains: Successfully added
+  [PASS] Contains: Added
   [PASS] Contains: track
 
 ============================================================
 SUMMARY
 ============================================================
-Passed: 22
-Failed: 1
+Passed: 23
+Failed: 0
 Total:  23
 
 CLEANUP NEEDED:
-  - Delete playlist: p.NAORFrZerg1
+  - Delete playlist: p.xVd1iEpKE5A
 
-Completed: 2025-12-19T23:22:46.840672
+Completed: 2025-12-20T10:37:15.162399

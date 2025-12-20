@@ -1,0 +1,168 @@
+Apple Music AppleScript Integration Test
+Started: 2025-12-20T10:40:24.114721
+
+[OK] AppleScript is available
+
+============================================================
+TEST: get_player_state
+============================================================
+Success: True
+Result: playing
+
+  [PASS] Operation succeeded
+  Player state: playing
+
+============================================================
+TEST: get_volume
+============================================================
+Success: True
+Result: 57
+
+  [PASS] Operation succeeded
+  Current volume: 57
+
+============================================================
+TEST: set_volume (to 25)
+============================================================
+Success: True
+Result: 
+
+  [PASS] Operation succeeded
+  [PASS] Volume confirmed at 25
+  Restored volume to 57
+
+============================================================
+TEST: get_shuffle
+============================================================
+Success: True
+Result: False
+
+  [PASS] Operation succeeded
+  Shuffle: off
+
+============================================================
+TEST: get_repeat
+============================================================
+Success: True
+Result: off
+
+  [PASS] Operation succeeded
+  Repeat: off
+
+============================================================
+TEST: get_current_track
+============================================================
+Success: True
+Result: {'state': 'playing', 'name': 'Life During Wartime', 'artist': 'Talking Heads', 'album': 'Fear of Music (Remastered Bonus Track Version)', 'duration': '221.367004394531', 'position': '29.857000350952', 'genre': 'Rock', 'year': '0'}
+
+  [PASS] Operation succeeded
+  Playing: Life During Wartime - Talking Heads
+
+============================================================
+TEST: get_playlists
+============================================================
+Success: True
+Result: [{'name': 'Music', 'id': '531F9970C140A8D3', 'smart': True, 'track_count': 12077, 'duration': '32:09:19:35'}, {'name': 'Music Videos', 'id': 'BE9D483F18337194', 'smart': True, 'track_count': 11, 'duration': '55:04'}, {'name': 'Favorite Songs', 'id': '58A0AFEA8DECA965', 'smart': True, 'track_count': 127, 'duration': '8:31:57'}, {'name': '🤟👶🎸 Jack & Norah', 'id': '583528883966122E', 'smart': False, 'track_count': 432, 'duration': '1:02:38:08'}, {'name': 'Jack Heard', 'id': '9C0723789BCE700A', 'sma...
+
+  [PASS] Operation succeeded
+  Found 22 playlists
+
+============================================================
+TEST: get_playlist_tracks
+============================================================
+Success: True
+Result: [{'name': 'What a Wonderful World', 'artist': 'Louis Armstrong', 'album': 'What a Wonderful World', 'duration': '2:19', 'genre': 'Jazz', 'year': '1967', 'id': '04A3D2B231CF0309'}, {'name': 'Around the World with Jack', 'artist': 'Udio v1', 'album': '', 'duration': '1:38', 'genre': 'pop', 'year': '0', 'id': '13DEEA194D5D8D06'}, {'name': 'Somewhere Over the Rainbow', 'artist': "Israel Kamakawiwo'ole", 'album': 'Alone in IZ World', 'duration': '3:30', 'genre': 'Worldwide', 'year': '1990', 'id': '04...
+
+  [PASS] Operation succeeded
+  Got 10 tracks from 'Jack's First Birthday! 🥳'
+  Sample track: What a Wonderful World - Louis Armstrong
+
+============================================================
+TEST: search_library ('love')
+============================================================
+Success: True
+Result: [{'name': 'At Your Best (You Are Love)', 'artist': 'Aaliyah', 'album': "Age Ain't Nothing But a Number (Deluxe)", 'duration': '4:51', 'genre': 'R&B/Soul', 'year': '1994', 'id': 'C18F368D987B0528'}, {'name': 'Teenage Love on the Phone', 'artist': 'Adam Sandler', 'album': "They're All Gonna Laugh at You", 'duration': '2:31', 'genre': 'Comedy', 'year': '0', 'id': '4E39F253EE9535D5'}, {'name': 'Crazy Love', 'artist': 'Adam Sandler', 'album': 'What the Hell Happened to Me?', 'duration': '3:56', 'genr...
+
+  [PASS] Operation succeeded
+  Found 100 results
+
+============================================================
+TEST: get_library_stats
+============================================================
+Success: True
+Result: {'track_count': 0, 'playlist_count': 0, 'player_state': ', playing, ', 'shuffle': False, 'repeat': ', off, ', 'volume': 0}
+
+  [PASS] Operation succeeded
+  Tracks: 0
+  Playlists: 0
+
+============================================================
+TEST: get_airplay_devices
+============================================================
+Success: True
+Result: ['Eric’s MacBook M3 Pro', 'Loft', 'Main Bedroom', 'Dining Room', 'Eric-M1-MBP', 'Jack’s Room', 'Kitchen', 'Libratone Zip', 'Living Room', 'Norah’s Room', 'Office Apple TV', 'Rodolfo III', 'Sound Bar']
+
+  [PASS] Operation succeeded
+  Found 13 AirPlay device(s)
+
+============================================================
+TEST: create_playlist
+============================================================
+Success: True
+Result: B6E856D1166C8580
+
+  [PASS] Operation succeeded
+  Created: __TEST_APPLESCRIPT_1766256033
+
+============================================================
+TEST: add_track_to_playlist
+============================================================
+Success: True
+Result: Added What a Wonderful World to __TEST_APPLESCRIPT_1766256033
+
+  [PASS] Operation succeeded
+  [PASS] Verified: playlist has 1 track(s)
+
+============================================================
+TEST: remove_track_from_playlist
+============================================================
+Success: True
+Result: Removed What a Wonderful World from __TEST_APPLESCRIPT_1766256033
+
+  [PASS] Operation succeeded
+
+============================================================
+TEST: delete_playlist
+============================================================
+Success: True
+Result: Deleted playlist: __TEST_APPLESCRIPT_1766256033
+
+  [PASS] Operation succeeded
+
+============================================================
+TEST: set_repeat (invalid mode)
+============================================================
+  [PASS] Correctly rejected invalid mode
+
+============================================================
+TEST: get_playlist_tracks (nonexistent)
+============================================================
+  [PASS] Correctly reported playlist not found
+
+============================================================
+CLEANUP: Removing test playlists
+============================================================
+  Deleting: __TEST_PLAYLIST__
+    [OK] Deleted
+  Deleting: __TEST_PLAYLIST__
+    [OK] Deleted
+  Cleaned up 2 test playlist(s)
+
+============================================================
+SUMMARY
+============================================================
+Passed: 17
+Failed: 0
+Total:  17
+
+Completed: 2025-12-20T10:40:35.921226

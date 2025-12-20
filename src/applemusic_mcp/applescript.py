@@ -374,6 +374,53 @@ def delete_playlist(playlist_name: str) -> tuple[bool, str]:
     return success, output
 
 
+def track_exists_in_playlist(playlist_name: str, track_name: str, artist: Optional[str] = None) -> tuple[bool, bool | str]:
+    """Quick check if a track exists in a playlist.
+
+    Args:
+        playlist_name: Playlist to check
+        track_name: Track name to look for
+        artist: Optional artist to match
+
+    Returns:
+        Tuple of (success, exists: bool | error: str)
+        On success, second element is True/False for exists.
+        On failure, second element is error message.
+    """
+    safe_playlist = _escape_for_applescript(playlist_name)
+    safe_track = _escape_for_applescript(track_name)
+
+    if artist:
+        safe_artist = _escape_for_applescript(artist)
+        track_filter = f'whose name contains "{safe_track}" and artist contains "{safe_artist}"'
+    else:
+        track_filter = f'whose name contains "{safe_track}"'
+
+    script = f'''
+    tell application "Music"
+        try
+            set targetPlaylist to first user playlist whose name is "{safe_playlist}"
+        on error
+            return "ERROR:Playlist not found"
+        end try
+        set matchingTracks to (every track of targetPlaylist {track_filter})
+        if (count of matchingTracks) > 0 then
+            return "FOUND:" & name of (item 1 of matchingTracks) & " - " & artist of (item 1 of matchingTracks)
+        else
+            return "NOT_FOUND"
+        end if
+    end tell
+    '''
+    success, output = run_applescript(script)
+    if not success:
+        return False, output
+    if output.startswith("ERROR:"):
+        return False, output[6:]
+    if output.startswith("FOUND:"):
+        return True, output[6:]  # Return the matched track info
+    return True, False  # NOT_FOUND
+
+
 def add_track_to_playlist(playlist_name: str, track_name: str, artist: Optional[str] = None) -> tuple[bool, str]:
     """Add a track from library to a playlist.
 
@@ -523,6 +570,32 @@ def play_track(track_name: str, artist: Optional[str] = None) -> tuple[bool, str
     if output.startswith("ERROR:"):
         return False, output[6:]
     return success, output
+
+
+def play_catalog_track(catalog_id: str, track_name: str = "", artist: str = "") -> tuple[bool, str]:
+    """Play a track from the Apple Music catalog (doesn't need to be in library).
+
+    Args:
+        catalog_id: The catalog song ID (from search_catalog)
+        track_name: Track name for display (optional)
+        artist: Artist name for display (optional)
+
+    Returns:
+        Tuple of (success, message or error)
+    """
+    # Use the Apple Music URL scheme to play catalog content, then ensure playback starts
+    script = f'''
+    tell application "Music"
+        open location "music://music.apple.com/us/song/{catalog_id}"
+        delay 1
+        play
+        return "Now playing from catalog"
+    end tell
+    '''
+    success, output = run_applescript(script)
+    if not success:
+        return False, output
+    return True, f"Now playing from catalog: {track_name} by {artist}"
 
 
 # =============================================================================

@@ -178,13 +178,15 @@ class TestAddToPlaylist:
             status=204,
         )
 
-        result = server.add_to_playlist("p.test123", "i.song1, i.song2, i.song3")
+        result = server.add_to_playlist(
+            playlist_id="p.test123", track_ids="i.song1, i.song2, i.song3"
+        )
 
-        assert "Successfully added" in result
+        assert "Added" in result
         assert "3 track" in result
 
-    def test_handles_empty_song_ids(self, mock_config_dir, mock_developer_token, mock_user_token):
-        """Should return error for empty song IDs."""
+    def test_handles_empty_track_ids(self, mock_config_dir, mock_developer_token, mock_user_token):
+        """Should return error for empty track IDs."""
         # Setup tokens
         dev_token_file = mock_config_dir / "developer_token.json"
         with open(dev_token_file, "w") as f:
@@ -194,9 +196,9 @@ class TestAddToPlaylist:
         with open(user_token_file, "w") as f:
             json.dump({"music_user_token": mock_user_token}, f)
 
-        result = server.add_to_playlist("p.test123", "")
+        result = server.add_to_playlist(playlist_id="p.test123", track_ids="")
 
-        assert "No song IDs provided" in result
+        assert "No track IDs provided" in result
 
 
 class TestSearchLibrary:

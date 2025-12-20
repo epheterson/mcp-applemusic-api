@@ -366,9 +366,11 @@ def run_tests():
     # ============ ADD TO PLAYLIST ============
     if test_playlist_id and library_song_id:
         try:
-            result = server.add_to_playlist(test_playlist_id, library_song_id)
+            result = server.add_to_playlist(
+                playlist_id=test_playlist_id, track_ids=library_song_id
+            )
             if check("add_to_playlist", result,
-                     ["Successfully added", "track"]):
+                     ["Added", "track"]):
                 results["passed"] += 1
             else:
                 results["failed"] += 1

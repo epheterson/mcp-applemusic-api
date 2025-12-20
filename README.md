@@ -173,7 +173,7 @@ Ask Claude things like:
 | `copy_playlist` | Copy to a new editable playlist |
 | `add_to_playlist` | Add tracks to a playlist |
 
-### Library Browsing
+### Your Library
 
 | Tool | Description |
 |------|-------------|
@@ -181,37 +181,37 @@ Ask Claude things like:
 | `get_library_artists` | List all artists in your library |
 | `get_library_songs` | List songs in your library (with limit) |
 | `get_library_music_videos` | List music videos in your library |
-| `search_library` | Search your library → library IDs |
-| `add_to_library` | Add catalog songs to your library |
 | `get_album_tracks` | Get all tracks from an album (library or catalog) |
+| `search_library` | Search your library → library IDs |
 | `get_recently_added` | Content recently added to your library |
 | `get_recently_played` | Recent listening history (albums/playlists) |
 | `get_recently_played_tracks` | Recent listening history (individual songs) |
+| `add_to_library` | Add catalog songs to your library |
+| `rate_song` | Love or dislike a song |
 
-### Catalog Search
+### Catalog
 
 | Tool | Description |
 |------|-------------|
 | `search_catalog` | Search Apple Music → catalog IDs |
 | `get_search_suggestions` | Get autocomplete suggestions for search terms |
 | `get_song_details` | Get full details for a song by ID |
-| `get_artist_details` | Search for artist and get albums |
+| `get_artist_details` | Get artist info and discography |
 | `get_artist_top_songs` | Get artist's most popular songs |
 | `get_similar_artists` | Find artists similar to a given artist |
-| `get_song_station` | Get radio station based on a song |
-| `get_charts` | Get Apple Music charts (songs, albums, playlists) |
 | `get_music_videos` | Search or browse music videos |
 | `get_genres` | List all available genres |
 | `get_storefronts` | List all Apple Music regions/countries |
 
-### Discovery & Personalization
+### Discovery & Radio
 
 | Tool | Description |
 |------|-------------|
 | `get_recommendations` | Get personalized recommendations |
 | `get_heavy_rotation` | Albums/playlists you play frequently |
 | `get_personal_station` | Get your personal radio station |
-| `rate_song` | Love or dislike a song |
+| `get_charts` | Get Apple Music charts (songs, albums, playlists) |
+| `get_song_station` | Get radio station based on a song |
 
 ### Utilities
 

@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **`remove_from_library`** - Remove tracks from library via AppleScript (macOS only)
+- **`check_playlist`** - Quick check if song/artist is in a playlist (cross-platform)
+- **`set_airplay_device`** - Switch audio output to AirPlay device (macOS)
 - **`_rate_song_api`** - Internal helper for rating songs via API
 
 ### Changed

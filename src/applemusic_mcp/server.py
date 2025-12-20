@@ -539,6 +539,69 @@ def get_playlist_tracks(
         return str(e)
 
 
+@mcp.tool()
+def check_playlist(
+    search: str,
+    playlist_id: str = "",
+    playlist_name: str = "",
+) -> str:
+    """
+    Quick check if a song or artist is in a playlist.
+
+    Provide EITHER playlist_id (API) OR playlist_name (AppleScript, macOS only).
+
+    Args:
+        search: Song name or artist to search for
+        playlist_id: Playlist ID (from get_library_playlists)
+        playlist_name: Playlist name (macOS only, uses AppleScript)
+
+    Returns: Summary of matches or "No matches"
+    """
+    use_api = bool(playlist_id)
+    use_applescript = bool(playlist_name)
+
+    if use_api and use_applescript:
+        return "Error: Provide either playlist_id or playlist_name, not both"
+    if not use_api and not use_applescript:
+        return "Error: Provide playlist_id or playlist_name"
+
+    search_lower = search.lower()
+    matches = []
+
+    if use_applescript:
+        if not APPLESCRIPT_AVAILABLE:
+            return "Error: playlist_name requires macOS"
+        success, tracks = asc.get_playlist_tracks(playlist_name)
+        if not success:
+            return f"Error: {tracks}"
+        for t in tracks:
+            name = t.get("name", "")
+            artist = t.get("artist", "")
+            if search_lower in name.lower() or search_lower in artist.lower():
+                matches.append(f"{name} by {artist}")
+    else:
+        success, tracks = _get_playlist_track_names(playlist_id)
+        if not success:
+            return f"Error: {tracks}"
+        for t in tracks:
+            name = t.get("name", "")
+            artist = t.get("artist", "")
+            if search_lower in name.lower() or search_lower in artist.lower():
+                matches.append(f"{name} by {artist}")
+
+    if not matches:
+        return f"No matches for '{search}'"
+
+    if len(matches) == 1:
+        return f"Found: {matches[0]}"
+
+    result = f"Found {len(matches)} matches:\n"
+    result += "\n".join(f"  - {m}" for m in matches[:10])
+    if len(matches) > 10:
+        result += f"\n  ...and {len(matches) - 10} more"
+    return result
+
+
 def _is_catalog_id(track_id: str) -> bool:
     """Check if an ID is a catalog ID (numeric) vs library ID (hex/prefixed)."""
     return track_id.isdigit()
@@ -2930,6 +2993,20 @@ if APPLESCRIPT_AVAILABLE:
             return "No AirPlay devices found"
 
         return f"AirPlay devices ({len(devices)}):\n" + "\n".join(f"  - {d}" for d in devices)
+
+    @mcp.tool()
+    def set_airplay_device(device_name: str) -> str:
+        """Switch audio output to an AirPlay device (macOS only).
+
+        Args:
+            device_name: Name of the AirPlay device (partial match OK)
+
+        Returns: Confirmation or error
+        """
+        success, result = asc.set_airplay_device(device_name)
+        if success:
+            return result
+        return f"Error: {result}"
 
     @mcp.tool()
     def local_search_library(query: str, search_type: str = "all") -> str:

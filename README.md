@@ -95,7 +95,7 @@ Ask Claude things like:
 
 ---
 
-## Tools (53 total)
+## Tools (55 total)
 
 ### Playlists
 | Tool | Description | Method | Platform |
@@ -107,6 +107,7 @@ Ask Claude things like:
 | `copy_playlist` | Copy playlist to editable version | API | All |
 | `remove_from_playlist` | Remove track from playlist | AppleScript | macOS |
 | `delete_playlist` | Delete playlist | AppleScript | macOS |
+| `check_playlist` | Quick check if song/artist in playlist | API or AS | All |
 
 `add_to_playlist` accepts catalog IDs (auto-adds to library first) or library IDs. Duplicate checking is on by default. By-name mode uses AppleScript and can edit ANY playlist.
 
@@ -167,6 +168,7 @@ Ask Claude things like:
 |------|-------------|--------|----------|
 | `check_auth_status` | Verify tokens and API connection | API | All |
 | `get_airplay_devices` | List AirPlay devices | AppleScript | macOS |
+| `set_airplay_device` | Switch audio to AirPlay device | AppleScript | macOS |
 | `reveal_in_music` | Show track in Music app | AppleScript | macOS |
 | `get_cache_info` | Show CSV cache info | Local | All |
 | `clear_cache` | Clear cached exports | Local | All |

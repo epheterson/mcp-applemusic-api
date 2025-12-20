@@ -891,6 +891,34 @@ def get_airplay_devices() -> tuple[bool, list[str]]:
     return True, devices
 
 
+def set_airplay_device(device_name: str) -> tuple[bool, str]:
+    """Switch audio output to a specific AirPlay device.
+
+    Args:
+        device_name: Name of the AirPlay device (or partial match)
+
+    Returns:
+        Tuple of (success, message or error)
+    """
+    safe_name = _escape_for_applescript(device_name)
+
+    script = f'''
+    tell application "Music"
+        try
+            set targetDevice to first AirPlay device whose name contains "{safe_name}"
+        on error
+            return "ERROR:Device not found: {safe_name}"
+        end try
+        set current AirPlay devices to {{targetDevice}}
+        return "Switched to: " & name of targetDevice
+    end tell
+    '''
+    success, output = run_applescript(script)
+    if output.startswith("ERROR:"):
+        return False, output[6:]
+    return success, output
+
+
 # =============================================================================
 # Utilities
 # =============================================================================

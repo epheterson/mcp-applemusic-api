@@ -1,5 +1,5 @@
 Apple Music MCP Integration Test
-Started: 2025-12-20T14:57:17.912274
+Started: 2025-12-20T15:30:48.703786
 
 
 ============================================================
@@ -20,7 +20,7 @@ API Connection: OK
 TEST: get_library_playlists
 ============================================================
 Result preview:
-=== 80 playlists ===
+=== 81 playlists ===
 Full data: /Users/elp/.cache/applemusic-mcp/library_playlists.csv
 
 Barack Obama’s Summer 2024 (ID: p.9YMaUlGQlbJ, read-only, modified 2024-08-14)
@@ -75,7 +75,7 @@ Aaron B...
 TEST: get_library_albums
 ============================================================
 Result preview:
-=== 1748 albums ===
+=== 1749 albums ===
 Full data: /Users/elp/.cache/applemusic-mcp/library_albums.csv
 
 A a a a a Very Good Song - Single - Samir Mezrahi (1) l.hsreRMb
@@ -110,7 +110,7 @@ Full data: /Users/elp/.cache/applemusic-mcp/album_l_hsreRMb.csv
 TEST: get_library_artists
 ============================================================
 Result preview:
-=== 1072 artists ===
+=== 1073 artists ===
 Full data: /Users/elp/.cache/applemusic-mcp/library_artists.csv
 
 A Tribe Called Quest (r.BDaiew5)
@@ -140,7 +140,7 @@ TEST: search_library ('love')
 ============================================================
 Result preview:
 === 5 results for 'love' (Full format) ===
-Full data: /Users/elp/.cache/applemusic-mcp/search_library_love_20251220_145749.csv
+Full data: /Users/elp/.cache/applemusic-mcp/search_library_love_20251220_153122.csv
 
 She Comes In Colors - Love (2:46) Da Capo [1966] Rock i.GXR0af98l9O2
 Grace (Anxiety) - Louderbach (6:43) Enemy Love [2006] Electronic i.X6zF2Mo219
@@ -157,7 +157,7 @@ TEST: search_catalog ('Beatles')
 ============================================================
 Result preview:
 === 5 Songs (use add_to_library with these IDs) ===
-Full data: /Users/elp/.cache/applemusic-mcp/search_catalog_Beatles_20251220_145750.csv
+Full data: /Users/elp/.cache/applemusic-mcp/search_catalog_Beatles_20251220_153123.csv
 
 In My Life - The Beatles (2:26) Rubber Soul [1965] Rock 1441164829
 Yesterday - The Beatles (2:05) Help! [1965] Rock 1441164805
@@ -176,11 +176,11 @@ Result preview:
 === 5 recently played tracks (Full format) ===
 Full data: /Users/elp/.cache/applemusic-mcp/recently_played.csv
 
-Time Warp - A Space for Rent (2:16) Time Warp - Single [2023] Hip-Hop/Rap 1707881341
-somewhere in the static - slowburn (1:40) somewhere in the static - Single [2025] Hip-Hop/Rap 1805197416
-jupiter and the moon - 96 Zeus & Dontcry (2:06) jupiter and the moon - Single [2025] Hip-Hop/Rap 1824052520
-Who Am I - Calm Chapter (2:11) Between The Lines [2024] Hip-Hop/Rap 1757721194
-see u aroun...
+Brighter Days - Bcalm (2:56) Brighter Days - Single [2024] Hip-Hop/Rap 1736257685
+hidden glow - tonbo (1:58) hidden glow - Single [2025] Hip-Hop/Rap 1818009248
+as the night breathes - munday (2:29) as the night breathes - Single [2025] Hip-Hop/Rap 1793960788
+perfect to me - Trix. & Hoogway (2:24) perfect to me - Single [2025] Hip-Hop/Rap 1802981800
+Tele - Noni (2:18) Tele - Single [202...
 
   [PASS] Contains: recently played
   [PASS] Contains: Full data:
@@ -193,11 +193,11 @@ Result preview:
 === 10 recently added items ===
 Full data: /Users/elp/.cache/applemusic-mcp/recently_added.csv
 
+The Gambler - Kenny Rogers (1 tracks) (albums) [added 2025-12-20] [ID: l.Zbeuco1]
+__TEST_PLAYLIST__ (playlists) [added 2025-12-20] [ID: p.E9r2FoL8oxe]
 Fear of a Black Planet - Public Enemy (1 tracks) (albums) [added 2025-12-20] [ID: l.RjVgf8w]
 (What's the Story) Morning Glory? - Oasis (1 tracks) (albums) [added 2025-12-19] [ID: l.ms2nB5]
-Very Necessary - Salt-N-Pepa (1 tracks) (albums) [added 2025-12-19] [ID: l.Vmrb5t7]
-The Bodyguard (Original Soundtrack Album) - Whitney Houston (1 tracks) (albums) [added 2025-12-19] [ID: l.Gi1S6cl]
-Total - Joy Divi...
+Very Necessary - Salt-N-Pepa (1 tracks) (albums) [added 2025-12-...
 
   [PASS] Contains: recently added
   [PASS] Contains: Full data:
@@ -225,7 +225,7 @@ Today’s Easy Hits (playlists) [ID: pl.3a85cc83130443b...
 TEST: get_recommendations
 ============================================================
 Result preview:
-=== 69 recommendations ===
+=== 77 recommendations ===
 Full data: /Users/elp/.cache/applemusic-mcp/recommendations.csv
 === Made for You ===
   New Music  (playlists) [ID: pl.pm-20e9f373919da0807d875aeac4a5ec05]
@@ -375,14 +375,14 @@ TEST: get_cache_info
 ============================================================
 Result preview:
 === Cache: /Users/elp/.cache/applemusic-mcp ===
-Total: 133 files, 664.0 KB
+Total: 140 files, 678.6 KB
 
 recommendations.csv (6KB, 0h ago)
 heavy_rotation.csv (2KB, 0h ago)
 recently_added.csv (2KB, 0h ago)
-recently_played.csv (471B, 0h ago)
-search_catalog_Beatles_20251220_145750.csv (405B, 0h ago)
-search_library_love_20251220_145749.csv (427B, 0h ago)
+recently_played.csv (431B, 0h ago)
+search_catalog_Beatles_20251220_153123.csv (405B, 0h ago)
+search_library_love_20251220_153122.csv (427B, 0h ago)
 library_artists.csv (26KB, 0h ago)
 album_l_hsreRMb.csv (175B, 0h ago)
 library_albums.csv (491KB, 0h ago)
@@ -396,7 +396,7 @@ playlist_p_9YMaUlGQlbJ.csv (4KB, 0h ag...
 TEST: create_playlist
 ============================================================
 Result preview:
-Created playlist '__TEST_PLAYLIST__' (ID: p.E9r2FoL8oxe)
+Created playlist '__TEST_PLAYLIST__' (ID: p.rxJ0h6qm6Y3)
 
   [PASS] Contains: Created
   [PASS] Contains: __TEST_PLAYLIST__
@@ -420,6 +420,6 @@ Failed: 0
 Total:  23
 
 CLEANUP NEEDED:
-  - Delete playlist: p.E9r2FoL8oxe
+  - Delete playlist: p.rxJ0h6qm6Y3
 
-Completed: 2025-12-20T14:57:57.768699
+Completed: 2025-12-20T15:31:31.854658

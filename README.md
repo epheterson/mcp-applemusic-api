@@ -142,7 +142,7 @@ Ask Claude things like:
 
 ---
 
-## Tools Available (27 total)
+## Tools Available (31 total)
 
 ### Playlists
 
@@ -161,6 +161,7 @@ Ask Claude things like:
 | `get_library_albums` | List all albums in your library |
 | `get_library_artists` | List all artists in your library |
 | `get_library_songs` | List songs in your library (with limit) |
+| `get_library_music_videos` | List music videos in your library |
 | `search_library` | Search your library → library IDs |
 | `add_to_library` | Add catalog songs to your library |
 | `get_album_tracks` | Get all tracks from an album (library or catalog) |
@@ -173,6 +174,7 @@ Ask Claude things like:
 | Tool | Description |
 |------|-------------|
 | `search_catalog` | Search Apple Music → catalog IDs |
+| `get_search_suggestions` | Get autocomplete suggestions for search terms |
 | `get_song_details` | Get full details for a song by ID |
 | `get_artist_details` | Search for artist and get albums |
 | `get_artist_top_songs` | Get artist's most popular songs |
@@ -181,6 +183,7 @@ Ask Claude things like:
 | `get_charts` | Get Apple Music charts (songs, albums, playlists) |
 | `get_music_videos` | Search or browse music videos |
 | `get_genres` | List all available genres |
+| `get_storefronts` | List all Apple Music regions/countries |
 
 ### Discovery & Personalization
 
@@ -188,6 +191,7 @@ Ask Claude things like:
 |------|-------------|
 | `get_recommendations` | Get personalized recommendations |
 | `get_heavy_rotation` | Albums/playlists you play frequently |
+| `get_personal_station` | Get your personal radio station |
 | `rate_song` | Love or dislike a song |
 
 ### Utilities
@@ -298,6 +302,9 @@ pip install -e ".[dev]"
 
 # Run tests
 pytest
+
+# Validate all endpoints against your live library
+python scripts/validate_endpoints.py
 
 # Format code
 black src/ tests/

@@ -1202,6 +1202,152 @@ def get_genres() -> str:
         return str(e)
 
 
+@mcp.tool()
+def get_search_suggestions(term: str) -> str:
+    """
+    Get autocomplete/typeahead suggestions for a search term.
+    Useful for building search interfaces or getting quick results.
+
+    Args:
+        term: Partial search term (e.g., "tay" for Taylor Swift)
+
+    Returns: List of suggested search terms
+    """
+    try:
+        headers = get_headers()
+        response = requests.get(
+            f"{BASE_URL}/catalog/{STOREFRONT}/search/suggestions",
+            headers=headers,
+            params={"term": term, "kinds": "terms", "limit": 10},
+        )
+        response.raise_for_status()
+        data = response.json()
+
+        suggestions = data.get("results", {}).get("suggestions", [])
+        output = ["=== Search Suggestions ==="]
+        for suggestion in suggestions:
+            if suggestion.get("kind") == "terms":
+                search_term = suggestion.get("searchTerm", "")
+                display = suggestion.get("displayTerm", search_term)
+                output.append(f"  {display}")
+
+        return "\n".join(output) if len(output) > 1 else "No suggestions found"
+
+    except requests.exceptions.RequestException as e:
+        return f"API Error: {str(e)}"
+    except (FileNotFoundError, ValueError) as e:
+        return str(e)
+
+
+@mcp.tool()
+def get_storefronts() -> str:
+    """
+    Get all available Apple Music storefronts (regions/countries).
+    Useful for understanding which markets are available.
+
+    Returns: List of storefronts with their codes and names
+    """
+    try:
+        headers = get_headers()
+        response = requests.get(
+            f"{BASE_URL}/storefronts",
+            headers=headers,
+        )
+        response.raise_for_status()
+        data = response.json()
+
+        output = ["=== Apple Music Storefronts ==="]
+        for storefront in data.get("data", []):
+            sf_id = storefront.get("id", "")
+            attrs = storefront.get("attributes", {})
+            name = attrs.get("name", "Unknown")
+            language = attrs.get("defaultLanguageTag", "")
+            output.append(f"  {sf_id.upper()}: {name} ({language})")
+
+        return "\n".join(output) if len(output) > 1 else "No storefronts found"
+
+    except requests.exceptions.RequestException as e:
+        return f"API Error: {str(e)}"
+    except (FileNotFoundError, ValueError) as e:
+        return str(e)
+
+
+@mcp.tool()
+def get_library_music_videos() -> str:
+    """
+    Get music videos saved in your personal library.
+
+    Returns: List of music videos with their IDs
+    """
+    try:
+        headers = get_headers()
+        response = requests.get(
+            f"{BASE_URL}/me/library/music-videos",
+            headers=headers,
+            params={"limit": 50},
+        )
+        response.raise_for_status()
+        data = response.json()
+
+        output = ["=== Library Music Videos ==="]
+        for video in data.get("data", []):
+            attrs = video.get("attributes", {})
+            name = attrs.get("name", "Unknown")
+            artist = attrs.get("artistName", "Unknown")
+            video_id = video.get("id")
+            output.append(f"{name} - {artist} [library ID: {video_id}]")
+
+        return "\n".join(output) if len(output) > 1 else "No music videos in library"
+
+    except requests.exceptions.RequestException as e:
+        return f"API Error: {str(e)}"
+    except (FileNotFoundError, ValueError) as e:
+        return str(e)
+
+
+@mcp.tool()
+def get_personal_station() -> str:
+    """
+    Get your personal Apple Music radio station.
+    This is a station curated based on your listening history.
+
+    Returns: Personal station info
+    """
+    try:
+        headers = get_headers()
+        response = requests.get(
+            f"{BASE_URL}/catalog/{STOREFRONT}/stations",
+            headers=headers,
+            params={"filter[identity]": "personal"},
+        )
+        response.raise_for_status()
+        data = response.json()
+
+        stations = data.get("data", [])
+        if not stations:
+            return "No personal station found (may require more listening history)"
+
+        station = stations[0]
+        attrs = station.get("attributes", {})
+        name = attrs.get("name", "Your Personal Station")
+        station_id = station.get("id")
+        is_live = attrs.get("isLive", False)
+
+        output = [
+            f"=== {name} ===",
+            f"Station ID: {station_id}",
+            f"Type: {'Live' if is_live else 'On-demand'}",
+            "",
+            "This station plays music based on your listening history and preferences.",
+        ]
+        return "\n".join(output)
+
+    except requests.exceptions.RequestException as e:
+        return f"API Error: {str(e)}"
+    except (FileNotFoundError, ValueError) as e:
+        return str(e)
+
+
 # ============ STATUS ============
 
 

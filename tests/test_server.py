@@ -198,7 +198,7 @@ class TestAddToPlaylist:
 
         result = server.add_to_playlist(playlist_id="p.test123", track_ids="")
 
-        assert "No track IDs provided" in result
+        assert "track_ids or track_name" in result
 
 
 class TestSearchLibrary:

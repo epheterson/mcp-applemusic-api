@@ -800,18 +800,19 @@ def add_to_playlist(
     - Optionally verifies the add succeeded
     - Works with ANY playlist on macOS via AppleScript
 
-    MODE 1 - By IDs (cross-platform):
+    MODE 1 - By playlist ID (cross-platform, API-editable playlists only):
         add_to_playlist(playlist_id="p.ABC123", track_ids="1440783617")  # catalog ID
         add_to_playlist(playlist_id="p.ABC123", track_ids="i.XYZ789")    # library ID
 
-    MODE 2 - By names (macOS only, works on ANY playlist):
+    MODE 2 - By playlist name (macOS only, works on ANY playlist):
         add_to_playlist(playlist_name="Road Trip", track_name="Hey Jude", artist="The Beatles")
+        add_to_playlist(playlist_name="Road Trip", track_ids="1440783617")  # also works!
 
     Args:
-        playlist_id: Playlist ID (from get_library_playlists)
-        track_ids: Track IDs - accepts catalog IDs (numeric) or library IDs
+        playlist_id: Playlist ID (from get_library_playlists) - API mode
+        track_ids: Track IDs - catalog (numeric) or library IDs
         playlist_name: Playlist name (macOS only, uses AppleScript)
-        track_name: Track name (macOS only)
+        track_name: Track name (macOS only, for name-based matching)
         artist: Artist name (optional, helps with matching)
         allow_duplicates: If False (default), skip tracks already in playlist
         verify: If True, verify track was added (slower but confirms success)
@@ -820,21 +821,93 @@ def add_to_playlist(
     """
     steps = []  # Track what we did for verbose output
 
-    # Determine which mode
-    use_api = bool(playlist_id)
-    use_applescript = bool(playlist_name and track_name)
+    # Determine which mode - more flexible now
+    has_playlist_id = bool(playlist_id)
+    has_playlist_name = bool(playlist_name)
+    has_track_ids = bool(track_ids)
+    has_track_name = bool(track_name)
 
-    if use_api and use_applescript:
-        return "Error: Provide either IDs or names, not both"
+    # Validate combinations
+    if has_playlist_id and has_playlist_name:
+        return "Error: Provide either playlist_id or playlist_name, not both"
 
-    if not use_api and not use_applescript:
-        return "Error: Provide playlist_id + track_ids, or playlist_name + track_name"
+    if not has_playlist_id and not has_playlist_name:
+        return "Error: Provide playlist_id or playlist_name"
 
-    # === MODE 2: AppleScript with names (macOS) ===
-    if use_applescript:
+    if not has_track_ids and not has_track_name:
+        return "Error: Provide track_ids or track_name"
+
+    # === AppleScript mode (playlist by name) ===
+    if has_playlist_name:
         if not APPLESCRIPT_AVAILABLE:
-            return "Error: Name-based add requires macOS"
+            return "Error: playlist_name requires macOS (use playlist_id for cross-platform)"
 
+        # If we have track_ids but not track_name, look up track info first
+        if has_track_ids and not has_track_name:
+            headers = get_headers()
+            ids = [s.strip() for s in track_ids.split(",") if s.strip()]
+            results = []
+
+            for track_id in ids:
+                # Get track info from catalog or library
+                if _is_catalog_id(track_id):
+                    # Add to library first
+                    steps.append(f"Adding catalog ID {track_id} to library...")
+                    params = {"ids[songs]": track_id}
+                    requests.post(f"{BASE_URL}/me/library", headers=headers, params=params)
+
+                    # Get catalog info
+                    response = requests.get(
+                        f"{BASE_URL}/catalog/us/songs/{track_id}", headers=headers
+                    )
+                    if response.status_code != 200:
+                        steps.append(f"  Error: Could not get info for {track_id}")
+                        continue
+                    data = response.json().get("data", [])
+                    if not data:
+                        continue
+                    attrs = data[0].get("attributes", {})
+                    name = attrs.get("name", "")
+                    artist_name = attrs.get("artistName", "")
+                else:
+                    # Library ID - look up info
+                    response = requests.get(
+                        f"{BASE_URL}/me/library/songs/{track_id}", headers=headers
+                    )
+                    if response.status_code != 200:
+                        steps.append(f"Error: Could not get info for {track_id}")
+                        continue
+                    data = response.json().get("data", [])
+                    if not data:
+                        continue
+                    attrs = data[0].get("attributes", {})
+                    name = attrs.get("name", "")
+                    artist_name = attrs.get("artistName", "")
+
+                if not name:
+                    steps.append(f"  Error: No name found for {track_id}")
+                    continue
+
+                # Wait a moment for library sync if it was a catalog ID
+                if _is_catalog_id(track_id):
+                    time.sleep(0.5)
+
+                # Add via AppleScript
+                success, result = asc.add_track_to_playlist(
+                    playlist_name, name, artist_name if artist_name else None
+                )
+                if success:
+                    steps.append(f"Added: {name} - {artist_name}")
+                    results.append(True)
+                else:
+                    steps.append(f"Failed to add {name}: {result}")
+                    results.append(False)
+
+            if not results:
+                return "Error: No tracks could be added\n" + "\n".join(steps)
+            return "\n".join(steps)
+
+        # track_name mode (original AppleScript behavior)
         # Quick duplicate check
         if not allow_duplicates:
             success, exists = asc.track_exists_in_playlist(
@@ -866,7 +939,7 @@ def add_to_playlist(
 
         return "\n".join(steps)
 
-    # === MODE 1: API with IDs ===
+    # === API mode (playlist by ID) ===
     try:
         headers = get_headers()
         ids = [s.strip() for s in track_ids.split(",") if s.strip()]

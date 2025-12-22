@@ -609,29 +609,51 @@ def play_track(track_name: str, artist: Optional[str] = None) -> tuple[bool, str
     return success, output
 
 
-def open_catalog_song(catalog_id: str) -> tuple[bool, str]:
-    """Open a catalog song in the Music app (for browsing/manual play).
+def open_catalog_song(song_url: str) -> tuple[bool, str]:
+    """Open a catalog song in the Music app (user must click play).
 
-    Note: AppleScript cannot auto-play catalog songs not in your library.
-    This opens the song page so the user can click play manually.
+    Note: macOS cannot programmatically play catalog songs not in library.
+    This function reveals the song in Music for manual playback.
 
     Args:
-        catalog_id: The catalog song ID (from search_catalog)
+        song_url: The song URL from Apple Music API (https://music.apple.com/...)
 
     Returns:
         Tuple of (success, message or error)
     """
-    script = f'''
-    tell application "Music"
-        open location "music://music.apple.com/us/song/{catalog_id}"
-        activate
-        return "Opened catalog song"
-    end tell
-    '''
-    success, output = run_applescript(script)
-    if not success:
-        return False, output
-    return True, "Opened in Music app"
+    import subprocess
+
+    # Validate URL format - must be an Apple Music URL
+    if not song_url or not isinstance(song_url, str):
+        return False, "Invalid URL: empty or not a string"
+
+    # Normalize the URL - handle both https:// and music:// schemes
+    if song_url.startswith("music://"):
+        music_url = song_url
+        https_url = song_url.replace("music://", "https://")
+    elif song_url.startswith("https://music.apple.com"):
+        https_url = song_url
+        music_url = song_url.replace("https://", "music://")
+    elif song_url.startswith("https://"):
+        # Non-Apple Music https URL - reject it
+        return False, f"Not an Apple Music URL: {song_url}"
+    else:
+        # Assume it might be a bare URL without scheme
+        return False, f"Invalid URL format: {song_url}"
+
+    # Try music:// scheme first - opens directly in Music app
+    try:
+        subprocess.run(["open", music_url], check=True, capture_output=True)
+        return True, "Opened in Music"
+    except subprocess.CalledProcessError:
+        pass
+
+    # Fallback: https:// opens in browser which redirects to Music
+    try:
+        subprocess.run(["open", https_url], check=True, capture_output=True)
+        return True, "Opened via browser"
+    except subprocess.CalledProcessError:
+        return False, f"Failed to open: {song_url}"
 
 
 # =============================================================================

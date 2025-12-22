@@ -48,3 +48,4 @@ music_user_token.json
 .coverage
 htmlcov/
 apple-music-credentials.md
+*_results.txt

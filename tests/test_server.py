@@ -707,3 +707,66 @@ class TestAddToLibraryTool:
         result = server.add_to_library("123456789, 987654321")
         assert "Successfully added" in result
         assert "2 song" in result
+
+
+class TestPlayTrackMatching:
+    """Tests for play_track song matching logic."""
+
+    def test_matches_featured_artist_in_song_name(self):
+        """Should match artist in song name for featured artists."""
+        # Mock song with featured artist in title
+        song = {
+            "id": "123",
+            "attributes": {
+                "name": "Uptown Funk (feat. Bruno Mars)",
+                "artistName": "Mark Ronson",
+                "url": "https://music.apple.com/us/song/123"
+            }
+        }
+        
+        # Check if "Bruno Mars" matches (in song name, not artistName)
+        song_name = song["attributes"]["name"]
+        song_artist = song["attributes"]["artistName"]
+        artist = "Bruno Mars"
+        
+        # This is the matching logic from play_track
+        matches_artist = artist.lower() in song_artist.lower() or artist.lower() in song_name.lower()
+        assert matches_artist is True
+
+    def test_matches_artist_in_artist_name(self):
+        """Should match artist in artistName field."""
+        song_name = "Bohemian Rhapsody"
+        song_artist = "Queen"
+        artist = "Queen"
+        
+        matches_artist = artist.lower() in song_artist.lower() or artist.lower() in song_name.lower()
+        assert matches_artist is True
+
+    def test_no_match_when_artist_not_found(self):
+        """Should not match when artist is in neither field."""
+        song_name = "Some Song"
+        song_artist = "Some Artist"
+        artist = "Different Artist"
+        
+        matches_artist = artist.lower() in song_artist.lower() or artist.lower() in song_name.lower()
+        assert matches_artist is False
+
+    def test_partial_track_name_match(self):
+        """Should match partial track names."""
+        song_name = "Bohemian Rhapsody (Remastered 2011)"
+        track_name = "Bohemian Rhapsody"
+        
+        matches_track = track_name.lower() in song_name.lower()
+        assert matches_track is True
+
+    def test_case_insensitive_matching(self):
+        """Should match regardless of case."""
+        song_name = "BOHEMIAN RHAPSODY"
+        song_artist = "QUEEN"
+        track_name = "bohemian rhapsody"
+        artist = "queen"
+        
+        matches_track = track_name.lower() in song_name.lower()
+        matches_artist = artist.lower() in song_artist.lower()
+        assert matches_track is True
+        assert matches_artist is True

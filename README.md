@@ -4,22 +4,23 @@ MCP server for Apple Music - manage playlists, control playback, browse your lib
 
 ## Features
 
-| Feature | macOS | Windows/Linux |
-|---------|:-----:|:-------------:|
-| Search catalog & library | ✅ | ✅ |
-| Add songs to library | ✅ | ✅ |
-| Create playlists, add tracks | ✅ | ✅ |
-| Recommendations, charts, radio | ✅ | ✅ |
-| Browse albums, artists, songs | ✅ | ✅ |
-| Play/pause/skip/seek | ✅ | ❌ |
-| Volume/shuffle/repeat | ✅ | ❌ |
-| Remove tracks from playlists | ✅ | ❌ |
-| Delete playlists | ✅ | ❌ |
-| Edit ANY playlist | ✅ | ❌ |
+| Feature | macOS | API |
+|---------|:-----:|:---:|
+| Search catalog & library | ✓ | ✓ |
+| Add songs to library | ✓ | ✓ |
+| Create playlists | ✓ | ✓ |
+| Add tracks to playlists | ✓ | API-created |
+| Recommendations, charts, radio stations | ✓ | ✓ |
+| Love/dislike tracks | ✓ | ✓ |
+| CSV/JSON export | ✓ | ✓ |
+| Play tracks | ✓ |   |
+| Playback control (pause/skip/seek) | ✓ |   |
+| Volume, shuffle, repeat | ✓ |   |
+| Star ratings (1-5) | ✓ |   |
+| Remove tracks from playlists | ✓ |   |
+| Delete playlists | ✓ |   |
 
-On macOS, AppleScript removes most API limitations - edit or delete *any* playlist, not just API-created ones.
-
-**Note:** AppleScript can only play tracks in your library. For catalog tracks not in your library, `play_track` can add them first (`add_to_library=True`) or open them in Music for manual play (`reveal=True`).
+**macOS** uses AppleScript for full control. **API** mode works on Windows/Linux.
 
 ---
 
@@ -151,6 +152,8 @@ Ask Claude things like:
 | `get_player_state` | Get playing/paused/stopped state | AppleScript | macOS |
 | `seek_to_position` | Seek within current track | AppleScript | macOS |
 | `playback_settings` | Get/set volume, shuffle, repeat | AppleScript | macOS |
+
+`play_track` returns `[Library]`, `[Catalog]`, or `[Catalog→Library]` to show the source. Catalog tracks can be added first (`add_to_library=True`) or opened in Music (`reveal=True`) where you click play.
 
 ### Utilities
 | Tool | Description | Method | Platform |

@@ -276,9 +276,44 @@ class TestRemoveFromLibrary:
 class TestOpenCatalogSong:
     """Test open_catalog_song function."""
 
-    def test_open_catalog_song_returns_tuple(self):
-        """Should return (success, message) tuple."""
-        # Use a fake ID - will open Music app but not crash
-        success, result = asc.open_catalog_song("1234567890")
+    def test_open_catalog_song_returns_tuple(self, monkeypatch):
+        """Should return (success, message) tuple for valid Apple Music URL."""
+        # Mock subprocess to avoid launching Music
+        import subprocess
+        monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: None)
+
+        success, result = asc.open_catalog_song("https://music.apple.com/us/song/1234567890")
         assert isinstance(success, bool)
         assert isinstance(result, str)
+
+    def test_open_catalog_song_rejects_empty_url(self):
+        """Should reject empty URL."""
+        success, result = asc.open_catalog_song("")
+        assert success is False
+        assert "empty" in result.lower() or "invalid" in result.lower()
+
+    def test_open_catalog_song_rejects_non_apple_url(self):
+        """Should reject URLs that aren't from Apple Music."""
+        success, result = asc.open_catalog_song("https://spotify.com/track/123")
+        assert success is False
+        assert "not an apple music url" in result.lower()
+
+    def test_open_catalog_song_rejects_invalid_format(self):
+        """Should reject strings that aren't valid URLs."""
+        success, result = asc.open_catalog_song("just-a-random-string")
+        assert success is False
+        assert "invalid url format" in result.lower()
+
+    def test_open_catalog_song_accepts_music_scheme(self, monkeypatch):
+        """Should accept music:// scheme URLs."""
+        # Mock subprocess to avoid launching Music
+        import subprocess
+        monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: None)
+
+        success, result = asc.open_catalog_song("music://music.apple.com/us/song/1234567890")
+        assert isinstance(success, bool)
+        assert isinstance(result, str)
+        # If it fails, should not be a format rejection
+        if not success:
+            assert "invalid url format" not in result.lower()
+            assert "not an apple music url" not in result.lower()

@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **format=csv** - Inline CSV output in response (in addition to text/json/none)
 - **export=none** - Consistent "none" default instead of empty string
+- **play_track response prefixes** - Shows `[Library]`, `[Catalog]`, or `[Catalog→Library]` to indicate source
+- **Featured artist matching** - `play_track` matches "Bruno Mars" in "Uptown Funk (feat. Bruno Mars)"
+- **Catalog song reveal** - `reveal=True` opens song in Music app via `music://` URL (user clicks play)
+- **Add-to-library retry** - Retries add at 5s mark in case first attempt silently failed
+- **URL validation** - `open_catalog_song` validates Apple Music URLs before opening
 
 ## [0.2.2] - 2025-12-20
 

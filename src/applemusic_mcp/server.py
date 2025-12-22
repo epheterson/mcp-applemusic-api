@@ -2533,30 +2533,38 @@ if APPLESCRIPT_AVAILABLE:
         reveal: bool = False,
         add_to_library: bool = False,
     ) -> str:
-        """Play a track from your library (macOS only).
+        """Play a track (macOS only).
 
-        Plays tracks from your library. For songs not in your library, use
-        reveal=True to open in Music app, or add_to_library=True to add first.
-
-        Note: AppleScript cannot directly play catalog songs not in your library.
-        This is a macOS limitation, not a bug.
+        Response shows source: [Library], [Catalog], or [Catalog→Library].
 
         Args:
-            track_name: Name of the track to play (can be partial match)
-            artist: Optional artist name to disambiguate
-            reveal: If track not in library, open it in Music app
-            add_to_library: If track not in library, add it first then play
+            track_name: Name of the track (partial match OK)
+            artist: Artist name to disambiguate (also matches "feat. X")
+            reveal: Open catalog song in Music app (you click play)
+            add_to_library: Add catalog song to library, then auto-play
 
-        Returns: Confirmation message or error
+        Returns: Status message with [Source] prefix
         """
-        # Try library first
-        success, result = asc.play_track(track_name, artist if artist else None)
-        if success:
-            if reveal:
-                asc.reveal_track(track_name, artist if artist else None)
-            return result
+        # Search library first (doesn't foreground Music)
+        search_ok, lib_results = asc.search_library(track_name, "songs")
+        if search_ok and lib_results:
+            # Filter for matching artist if provided
+            for lib_track in lib_results:
+                lib_name = lib_track.get("name", "")
+                lib_artist = lib_track.get("artist", "")
+                if track_name.lower() not in lib_name.lower():
+                    continue
+                if artist and artist.lower() not in lib_artist.lower():
+                    continue
+                # Found match - now play it (will foreground Music)
+                success, result = asc.play_track(lib_name, lib_artist)
+                if success:
+                    if reveal:
+                        asc.reveal_track(lib_name, lib_artist)
+                    return f"[Library] {result}"
+                break
 
-        # Track not in library - search catalog using helper
+        # Track not in library - search catalog
         search_term = f"{track_name} {artist}".strip() if artist else track_name
         songs = _search_catalog_songs(search_term, limit=5)
 
@@ -2569,10 +2577,12 @@ if APPLESCRIPT_AVAILABLE:
             # Check if it's a reasonable match
             if track_name.lower() not in song_name.lower():
                 continue
-            if artist and artist.lower() not in song_artist.lower():
+            # Check artist in artistName OR song name (for "feat. X" cases)
+            if artist and artist.lower() not in song_artist.lower() and artist.lower() not in song_name.lower():
                 continue
 
             catalog_id = song.get("id")
+            song_url = attrs.get("url", "")
 
             # Option 1: Add to library first, then play
             if add_to_library:
@@ -2583,27 +2593,30 @@ if APPLESCRIPT_AVAILABLE:
                     for attempt in range(45):
                         if attempt > 0:
                             time.sleep(0.2)
+                        # Retry add at ~5s mark in case first silently failed
+                        if attempt == 20:
+                            _add_songs_to_library([catalog_id])
                         success, result = asc.play_track(song_name, song_artist)
                         if success:
                             if reveal:
                                 asc.reveal_track(song_name, song_artist)
-                            return f"Added to library and playing: {song_name} by {song_artist}"
-                    return f"Added to library but couldn't play yet: {song_name} by {song_artist}. Try again in a moment."
-                return f"Failed to add to library: {add_msg}"
+                            return f"[Catalog→Library] Playing: {song_name} by {song_artist}"
+                    return f"[Catalog→Library] Added but sync pending: {song_name} by {song_artist}"
+                return f"[Catalog] Failed to add: {add_msg}"
 
-            # Option 2: Just reveal in Music app
+            # Option 2: Open in Music app (user must click play)
             if reveal:
-                asc.open_catalog_song(catalog_id)
-                return (
-                    f"Opened in Music: {song_name} by {song_artist}. "
-                    f"Click play to start (AppleScript can't auto-play catalog songs not in library)."
-                )
+                if song_url:
+                    success, msg = asc.open_catalog_song(song_url)
+                    if success:
+                        return f"[Catalog] Opened: {song_name} by {song_artist} (click play)"
+                    return f"[Catalog] {msg}"
+                return f"[Catalog] No URL available for: {song_name}"
 
-            # Neither flag set - explain limitation
+            # Neither flag set - explain options
             return (
-                f"Found in catalog: {song_name} by {song_artist}. "
-                f"Use add_to_library=True to add and play, or reveal=True to open in Music app. "
-                f"(AppleScript cannot auto-play catalog songs not in your library)"
+                f"[Catalog] Found: {song_name} by {song_artist}. "
+                f"Use reveal=True to open in Music, or add_to_library=True to save & play."
             )
 
         return f"Track not found in library or catalog: {track_name}"

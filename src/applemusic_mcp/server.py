@@ -9,12 +9,14 @@ import io
 import json
 import time
 from pathlib import Path
+from typing import Optional
 
 import requests
 from mcp.server.fastmcp import FastMCP
 
-from .auth import get_developer_token, get_user_token, get_config_dir
+from .auth import get_developer_token, get_user_token, get_config_dir, get_user_preferences
 from . import applescript as asc
+from .track_cache import get_track_cache
 
 # Check if AppleScript is available (macOS only)
 APPLESCRIPT_AVAILABLE = asc.is_available()
@@ -33,6 +35,8 @@ def get_cache_dir() -> Path:
     cache_dir = Path.home() / ".cache" / "applemusic-mcp"
     cache_dir.mkdir(parents=True, exist_ok=True)
     return cache_dir
+
+
 
 
 def get_timestamp() -> str:
@@ -81,6 +85,7 @@ def extract_track_data(track: dict, include_extras: bool = False) -> dict:
         "album": attrs.get("albumName", ""),
         "year": release_date[:4] if release_date else "",
         "genre": genres[0] if genres else "",
+        "explicit": "Yes" if attrs.get("contentRating") == "explicit" else "No",
         "id": track.get("id", ""),
     }
 
@@ -109,7 +114,7 @@ def write_tracks_csv(track_data: list[dict], csv_path: Path, include_extras: boo
         csv_path: Path to write CSV file.
         include_extras: If True, include additional metadata columns.
     """
-    csv_fields = ["name", "duration", "artist", "album", "year", "genre", "id"]
+    csv_fields = ["name", "duration", "artist", "album", "year", "genre", "explicit", "id"]
     if include_extras:
         csv_fields += ["track_number", "disc_number", "has_lyrics", "catalog_id",
                        "composer", "isrc", "is_explicit", "preview_url", "artwork_url"]
@@ -121,17 +126,19 @@ def write_tracks_csv(track_data: list[dict], csv_path: Path, include_extras: boo
 
 
 def _format_full(t: dict) -> str:
-    """Full format: Name - Artist (duration) Album [Year] Genre id"""
+    """Full format: Name - Artist (duration) Album [Year] Genre [Explicit] id"""
     year_str = f" [{t['year']}]" if t["year"] else ""
     genre_str = f" {t['genre']}" if t["genre"] else ""
-    return f"{t['name']} - {t['artist']} ({t['duration']}) {t['album']}{year_str}{genre_str} {t['id']}"
+    explicit_str = " [Explicit]" if t.get("explicit") == "Yes" else ""
+    return f"{t['name']} - {t['artist']} ({t['duration']}) {t['album']}{year_str}{genre_str}{explicit_str} {t['id']}"
 
 
 def _format_clipped(t: dict) -> str:
-    """Clipped format: Truncated Name - Artist (duration) Album [Year] Genre id"""
+    """Clipped format: Truncated Name - Artist (duration) Album [Year] Genre [Explicit] id"""
     year_str = f" [{t['year']}]" if t["year"] else ""
     genre_str = f" {t['genre']}" if t["genre"] else ""
-    return f"{truncate(t['name'], 35)} - {truncate(t['artist'], 22)} ({t['duration']}) {truncate(t['album'], 30)}{year_str}{genre_str} {t['id']}"
+    explicit_str = " [Explicit]" if t.get("explicit") == "Yes" else ""
+    return f"{truncate(t['name'], 35)} - {truncate(t['artist'], 22)} ({t['duration']}) {truncate(t['album'], 30)}{year_str}{genre_str}{explicit_str} {t['id']}"
 
 
 def _format_compact(t: dict) -> str:
@@ -533,6 +540,7 @@ def get_playlist_tracks(
     format: str = "text",
     export: str = "none",
     full: bool = False,
+    fetch_explicit: Optional[bool] = None,
 ) -> str:
     """
     Get tracks in a playlist.
@@ -547,9 +555,22 @@ def get_playlist_tracks(
         format: "text" (default), "json", "csv", or "none" (export only)
         export: "none" (default), "csv", or "json" to write file
         full: Include all metadata in exports
+        fetch_explicit: If True, fetch explicit status via API (uses cache for speed).
+                       Uses user preference from config if not specified.
+
+    Note: When using playlist_name (AppleScript), explicit status defaults to "Unknown".
+    Set fetch_explicit=True to get accurate explicit info via API. Uses intelligent
+    caching - first check is ~1-2 sec, subsequent checks are instant for known tracks.
+
+    To set default: system(action="set-pref", preference="fetch_explicit", value=True)
 
     Returns: Track listing in requested format
     """
+    # Apply user preferences
+    if fetch_explicit is None:
+        prefs = get_user_preferences()
+        fetch_explicit = prefs["fetch_explicit"]
+
     use_api = bool(playlist_id)
     use_applescript = bool(playlist_name)
 
@@ -579,8 +600,119 @@ def get_playlist_tracks(
                 "duration": t.get("duration", "0:00"),
                 "genre": t.get("genre", ""),
                 "year": t.get("year", ""),
+                "explicit": "Unknown",  # Will be enriched below if fetch_explicit=True
                 "id": t.get("id", ""),
             })
+
+        # Enrich with explicit status via API if requested
+        # Uses TrackCache for ID-based caching (persistent, library, catalog IDs)
+        if fetch_explicit and track_data:
+            try:
+                cache = get_track_cache()
+
+                # First pass: fill in what we know from cache (ID-based lookup only)
+                unknown_tracks = []
+                for track in track_data:
+                    track_id = track.get("id", "")
+                    if track_id:
+                        cached_explicit = cache.get_explicit(track_id)
+                        if cached_explicit:
+                            track["explicit"] = cached_explicit
+                            continue
+                    unknown_tracks.append(track)
+
+                # If we have unknown tracks, fetch from API
+                if unknown_tracks:
+                    headers = get_headers()
+
+                    # Find the playlist in the API library by matching name
+                    response = requests.get(
+                        f"{BASE_URL}/me/library/playlists",
+                        headers=headers,
+                        params={"limit": 100}
+                    )
+
+                    if response.status_code == 200:
+                        playlists = response.json().get("data", [])
+                        api_playlist_id = None
+
+                        # Find matching playlist by name
+                        for pl in playlists:
+                            pl_name = pl.get("attributes", {}).get("name", "")
+                            if pl_name.lower() == playlist_name.lower() or playlist_name.lower() in pl_name.lower():
+                                api_playlist_id = pl.get("id")
+                                break
+
+                        # If found, fetch all tracks from API with explicit info
+                        if api_playlist_id:
+                            all_api_tracks = []
+                            offset = 0
+
+                            while True:
+                                track_response = requests.get(
+                                    f"{BASE_URL}/me/library/playlists/{api_playlist_id}/tracks",
+                                    headers=headers,
+                                    params={"limit": 100, "offset": offset}
+                                )
+                                if track_response.status_code != 200:
+                                    break
+
+                                tracks = track_response.json().get("data", [])
+                                if not tracks:
+                                    break
+
+                                all_api_tracks.extend(tracks)
+                                if len(tracks) < 100:
+                                    break
+                                offset += 100
+
+                            # Build temporary map for matching (name+artist+album -> API data)
+                            # This is NOT cached - just used for one-time matching
+                            api_track_map = {}
+
+                            for api_track in all_api_tracks:
+                                attrs = api_track.get("attributes", {})
+                                play_params = attrs.get("playParams", {})
+                                library_id = api_track.get("id", "")
+                                catalog_id = play_params.get("catalogId", "")
+                                isrc = attrs.get("isrc", "")
+                                track_name = attrs.get("name", "").lower()
+                                track_artist = attrs.get("artistName", "").lower()
+                                track_album = attrs.get("albumName", "").lower()
+                                explicit = "Yes" if attrs.get("contentRating") == "explicit" else "No"
+
+                                # Temporary match key (not cached)
+                                match_key = f"{track_name}|||{track_artist}|||{track_album}"
+                                api_track_map[match_key] = {
+                                    "library_id": library_id,
+                                    "catalog_id": catalog_id,
+                                    "isrc": isrc,
+                                    "explicit": explicit,
+                                }
+
+                            # Match AppleScript tracks to API tracks and cache
+                            for track in track_data:
+                                if track["explicit"] != "Unknown":
+                                    continue
+
+                                persistent_id = track.get("id", "")
+                                match_key = f"{track['name'].lower()}|||{track['artist'].lower()}|||{track['album'].lower()}"
+                                api_data = api_track_map.get(match_key)
+
+                                if api_data:
+                                    track["explicit"] = api_data["explicit"]
+
+                                    # Cache by all IDs for this track
+                                    cache.set_track_metadata(
+                                        explicit=api_data["explicit"],
+                                        persistent_id=persistent_id,
+                                        library_id=api_data["library_id"],
+                                        catalog_id=api_data["catalog_id"],
+                                        isrc=api_data["isrc"] or None,
+                                    )
+
+            except Exception:
+                pass  # API not available - explicit stays "Unknown"
 
         # Apply filter
         if filter:
@@ -946,6 +1078,15 @@ def add_to_playlist(
             playlist_name, track_name, artist if artist else None
         )
         if not success:
+            # Add helpful guidance for track not found
+            if "Track not found" in result:
+                catalog_search = f"{track_name} {artist}" if artist else track_name
+                return (
+                    f"Error: {result}\n\n"
+                    f"💡 Tip: Use search_catalog(query='{catalog_search}') to find the catalog ID, "
+                    f"then call add_to_playlist again with track_ids=<catalog_id>. "
+                    f"Catalog tracks are automatically added to your library."
+                )
             return f"Error: {result}"
         steps.append(result)
 
@@ -1097,20 +1238,67 @@ def add_to_playlist(
 
 
 @mcp.tool()
-def copy_playlist(source_playlist_id: str, new_name: str) -> str:
+def copy_playlist(
+    source_playlist_id: str = "",
+    source_playlist_name: str = "",
+    new_name: str = ""
+) -> str:
     """
     Copy a playlist to a new API-editable playlist.
     Use this to make an editable copy of a read-only playlist.
 
+    Provide EITHER source_playlist_id (API) OR source_playlist_name (macOS).
+
     Args:
-        source_playlist_id: ID of the playlist to copy
+        source_playlist_id: ID of the playlist to copy (API mode)
+        source_playlist_name: Name of the playlist to copy (macOS only, uses AppleScript)
         new_name: Name for the new playlist
 
     Returns: New playlist ID or error
     """
+    # Validate inputs
+    if not new_name:
+        return "Error: new_name is required"
+
+    has_id = bool(source_playlist_id)
+    has_name = bool(source_playlist_name)
+
+    if has_id and has_name:
+        return "Error: Provide either source_playlist_id or source_playlist_name, not both"
+    if not has_id and not has_name:
+        return "Error: Provide source_playlist_id or source_playlist_name"
+
     try:
         headers = get_headers()
 
+        # === AppleScript mode (by name) ===
+        if has_name:
+            if not APPLESCRIPT_AVAILABLE:
+                return "Error: source_playlist_name requires macOS (use source_playlist_id for cross-platform)"
+
+            # Get tracks from source playlist via AppleScript
+            success, source_tracks = asc.get_playlist_tracks(source_playlist_name)
+            if not success:
+                return f"Error: {source_tracks}"
+            if not source_tracks:
+                return f"Error: Playlist '{source_playlist_name}' is empty"
+
+            # Create new playlist via AppleScript
+            success, new_playlist_id = asc.create_playlist(new_name, "")
+            if not success:
+                return f"Error creating playlist: {new_playlist_id}"
+
+            # Add tracks to new playlist via AppleScript
+            for track in source_tracks:
+                track_name = track.get("name", "")
+                artist = track.get("artist", "")
+                if track_name:
+                    # Use add_to_playlist AppleScript function
+                    asc.add_track_to_playlist(new_name, track_name, artist if artist else None)
+
+            return f"Created '{new_name}' (ID: {new_playlist_id}) with {len(source_tracks)} tracks (macOS)"
+
+        # === API mode (by ID) ===
         # Get source playlist tracks
         all_tracks = []
         offset = 0
@@ -1164,7 +1352,7 @@ def copy_playlist(source_playlist_id: str, new_name: str) -> str:
 @mcp.tool()
 def search_library(
     query: str,
-    search_type: str = "songs",
+    types: str = "songs",
     limit: int = 25,
     format: str = "text",
     export: str = "none",
@@ -1177,7 +1365,7 @@ def search_library(
 
     Args:
         query: Search term
-        search_type: Type of search - songs, artists, albums, or all (macOS only)
+        types: Type of search - songs, artists, albums, or all (macOS only)
         limit: Max results (default 25, up to 100 on macOS)
         format: "text" (default), "json", "csv", or "none" (export only)
         export: "none" (default), "csv", or "json" to write file
@@ -1187,7 +1375,7 @@ def search_library(
     """
     # Try AppleScript on macOS (faster for local searches)
     if APPLESCRIPT_AVAILABLE:
-        success, results = asc.search_library(query, search_type)
+        success, results = asc.search_library(query, types)
         if success and results:
             return format_output(results, format, export, full, f"search_{query[:20]}")
         # AppleScript found nothing or failed - fall through to API
@@ -1298,6 +1486,7 @@ def search_catalog(
     format: str = "text",
     export: str = "none",
     full: bool = False,
+    clean_only: Optional[bool] = None,
 ) -> str:
     """
     Search the Apple Music catalog.
@@ -1309,9 +1498,18 @@ def search_catalog(
         format: "text" (default), "json", "csv", or "none" (export only)
         export: "none" (default), "csv", or "json" to write file (songs only)
         full: Include all metadata in exports
+        clean_only: If True, filter out explicit content (songs only).
+                   Uses user preference from config if not specified.
+
+    To set default: system(action="set-pref", preference="clean_only", value=True)
 
     Returns: Search results with catalog IDs (use add_to_library to add songs)
     """
+    # Apply user preferences
+    if clean_only is None:
+        prefs = get_user_preferences()
+        clean_only = prefs["clean_only"]
+
     try:
         headers = get_headers()
         response = requests.get(
@@ -1328,6 +1526,9 @@ def search_catalog(
 
         if "songs" in results:
             all_data["songs"] = [extract_track_data(s, full) for s in results["songs"].get("data", [])]
+            # Filter out explicit content if clean_only is True
+            if clean_only:
+                all_data["songs"] = [s for s in all_data["songs"] if s.get("explicit") == "No"]
 
         if "albums" in results:
             for album in results["albums"].get("data", []):
@@ -1368,7 +1569,8 @@ def search_catalog(
         if all_data["songs"]:
             output.append(f"=== {len(all_data['songs'])} Songs ===")
             for s in all_data["songs"]:
-                output.append(f"{s['name']} - {s['artist']} ({s['duration']}) {s['album']} [{s['year']}] {s['id']}")
+                explicit_marker = " [Explicit]" if s.get("explicit") == "Yes" else ""
+                output.append(f"{s['name']} - {s['artist']} ({s['duration']}) {s['album']} [{s['year']}]{explicit_marker} {s['id']}")
 
         if all_data["albums"]:
             output.append(f"\n=== {len(all_data['albums'])} Albums ===")
@@ -2337,38 +2539,97 @@ def get_personal_station() -> str:
         return str(e)
 
 
-# ============ CACHE MANAGEMENT ============
+# ============ SYSTEM MANAGEMENT ============
 
 
 @mcp.tool()
-def cache(action: str = "info", days_old: int = 0) -> str:
+def system(
+    action: str = "info",
+    days_old: int = 0,
+    preference: str = "",
+    value: Optional[bool] = None
+) -> str:
     """
-    View or clear cached CSV files.
+    System configuration, preferences, and cache management.
+
+    Actions:
+        - info (default): Show preferences, cache stats, and export files
+        - set-pref: Update a preference (requires preference and value params)
+        - clear-tracks: Clear track metadata cache
+        - clear-exports: Delete CSV/JSON export files (optionally by age)
 
     Args:
-        action: "info" (default) to list files, "clear" to delete files
-        days_old: When clearing, only delete files older than this (0 = all)
+        action: One of: info, set-pref, clear-tracks, clear-exports
+        days_old: When clearing exports, only delete files older than this (0 = all)
+        preference: For set-pref: fetch_explicit, reveal_on_library_miss, or clean_only
+        value: For set-pref: true or false
 
-    Returns: Cache info or deletion summary
+    Examples:
+        system()  # Show everything
+        system(action="set-pref", preference="fetch_explicit", value=True)
+        system(action="clear-tracks")  # Clear track metadata cache
+        system(action="clear-exports", days_old=7)  # Clear old exports
+
+    Returns: System info, preference update, or cache deletion summary
     """
     try:
-        cache_dir = get_cache_dir()
-        if not cache_dir.exists():
-            return "Cache directory doesn't exist"
+        action = action.lower()
 
-        csv_files = list(cache_dir.glob("*.csv"))
-        if not csv_files:
-            return "No CSV files in cache"
+        # === SET PREFERENCE ===
+        if action == "set-pref":
+            if not preference or value is None:
+                return "Error: set-pref requires both 'preference' and 'value' parameters"
 
-        now = time.time()
+            valid_prefs = ["fetch_explicit", "reveal_on_library_miss", "clean_only"]
+            if preference not in valid_prefs:
+                return f"Error: preference must be one of: {', '.join(valid_prefs)}"
 
-        if action.lower() == "clear":
+            # Load current config
+            from .auth import load_config, get_config_dir as get_auth_config_dir
+            try:
+                config = load_config()
+            except FileNotFoundError:
+                return "Error: config.json not found. Create it first with your API credentials."
+
+            # Update preferences
+            if "preferences" not in config:
+                config["preferences"] = {}
+            config["preferences"][preference] = value
+
+            # Save back
+            config_file = get_auth_config_dir() / "config.json"
+            with open(config_file, "w") as f:
+                json.dump(config, f, indent=2)
+
+            return f"✓ Updated: {preference} = {value}\n\nUse system() to see current preferences."
+
+        # === CLEAR TRACK CACHE ===
+        if action == "clear-tracks":
+            track_cache = get_track_cache()
+            num_entries = len(track_cache._cache)
+            track_cache.clear()
+            return f"✓ Cleared track metadata cache ({num_entries} entries removed)"
+
+        # === CLEAR EXPORT FILES ===
+        if action == "clear-exports":
+            cache_dir = get_cache_dir()
+            if not cache_dir.exists():
+                return "Cache directory doesn't exist"
+
+            export_files = list(cache_dir.glob("*.csv")) + list(cache_dir.glob("*.json"))
+            # Don't delete track_cache.json
+            export_files = [f for f in export_files if f.name != "track_cache.json"]
+
+            if not export_files:
+                return "No export files in cache"
+
+            now = time.time()
             cutoff = now - (days_old * 86400) if days_old > 0 else now + 1
             deleted = []
             kept = []
             total_size = 0
 
-            for f in csv_files:
+            for f in export_files:
                 file_size = f.stat().st_size
                 if days_old == 0 or f.stat().st_mtime < cutoff:
                     deleted.append(f.name)
@@ -2384,37 +2645,81 @@ def cache(action: str = "info", days_old: int = 0) -> str:
             else:
                 size_str = f"{total_size / (1024 * 1024):.1f} MB"
 
-            output = [f"Deleted: {len(deleted)} files ({size_str})"]
+            output = [f"✓ Deleted: {len(deleted)} export files ({size_str})"]
             if kept:
                 output.append(f"Kept: {len(kept)} files (newer than {days_old} days)")
             return "\n".join(output)
 
-        else:  # info
-            csv_files = sorted(csv_files, key=lambda f: f.stat().st_mtime, reverse=True)
-            total_size = 0
-            output = [f"=== Cache: {cache_dir} ===", ""]
+        # === INFO (DEFAULT) ===
+        else:
+            output = ["=== System Info ===", ""]
 
-            for f in csv_files:
-                file_size = f.stat().st_size
-                total_size += file_size
-                age_days = (now - f.stat().st_mtime) / 86400
+            # User Preferences
+            prefs = get_user_preferences()
+            output.append("Preferences (set via system(action='set-pref', ...)):")
+            output.append(f"  fetch_explicit: {prefs['fetch_explicit']}")
+            output.append(f"  reveal_on_library_miss: {prefs['reveal_on_library_miss']}")
+            output.append(f"  clean_only: {prefs['clean_only']}")
+            output.append("")
 
-                if file_size < 1024:
-                    size_str = f"{file_size}B"
-                elif file_size < 1024 * 1024:
-                    size_str = f"{file_size / 1024:.0f}KB"
+            # Track Metadata Cache
+            track_cache = get_track_cache()
+            num_tracks = len(track_cache._cache)
+            if track_cache.cache_file.exists():
+                cache_size = track_cache.cache_file.stat().st_size
+                if cache_size < 1024:
+                    size_str = f"{cache_size}B"
+                elif cache_size < 1024 * 1024:
+                    size_str = f"{cache_size / 1024:.0f}KB"
                 else:
-                    size_str = f"{file_size / (1024 * 1024):.1f}MB"
+                    size_str = f"{cache_size / (1024 * 1024):.1f}MB"
+                output.append(f"Track Metadata Cache: {num_tracks} entries, {size_str}")
+            else:
+                output.append(f"Track Metadata Cache: {num_tracks} entries (not yet saved)")
+            output.append(f"  Location: {track_cache.cache_file}")
+            output.append(f"  Clear: system(action='clear-tracks')")
+            output.append("")
 
-                age_str = f"{age_days * 24:.0f}h ago" if age_days < 1 else f"{age_days:.0f}d ago"
-                output.append(f"{f.name} ({size_str}, {age_str})")
+            # Export Files
+            cache_dir = get_cache_dir()
+            if cache_dir.exists():
+                export_files = list(cache_dir.glob("*.csv")) + list(cache_dir.glob("*.json"))
+                # Don't count track_cache.json
+                export_files = [f for f in export_files if f.name != "track_cache.json"]
 
-            total_str = f"{total_size / 1024:.1f} KB" if total_size < 1024 * 1024 else f"{total_size / (1024 * 1024):.1f} MB"
-            output.insert(1, f"Total: {len(csv_files)} files, {total_str}")
+                if export_files:
+                    export_files = sorted(export_files, key=lambda f: f.stat().st_mtime, reverse=True)
+                    total_size = sum(f.stat().st_size for f in export_files)
+                    total_str = f"{total_size / 1024:.0f}KB" if total_size < 1024 * 1024 else f"{total_size / (1024 * 1024):.1f}MB"
+                    output.append(f"Export Files: {len(export_files)} files, {total_str}")
+
+                    now = time.time()
+                    for f in export_files[:10]:  # Show most recent 10
+                        file_size = f.stat().st_size
+                        age_days = (now - f.stat().st_mtime) / 86400
+
+                        if file_size < 1024:
+                            size_str = f"{file_size}B"
+                        elif file_size < 1024 * 1024:
+                            size_str = f"{file_size / 1024:.0f}KB"
+                        else:
+                            size_str = f"{file_size / (1024 * 1024):.1f}MB"
+
+                        age_str = f"{age_days * 24:.0f}h ago" if age_days < 1 else f"{age_days:.0f}d ago"
+                        output.append(f"  {f.name} ({size_str}, {age_str})")
+
+                    if len(export_files) > 10:
+                        output.append(f"  ... and {len(export_files) - 10} more")
+                    output.append(f"  Clear: system(action='clear-exports')")
+                else:
+                    output.append("Export Files: None")
+            else:
+                output.append("Export Files: Cache directory doesn't exist yet")
+
             return "\n".join(output)
 
     except Exception as e:
-        return f"Error reading cache: {str(e)}"
+        return f"Error: {str(e)}"
 
 
 @mcp.tool()
@@ -2577,7 +2882,7 @@ if APPLESCRIPT_AVAILABLE:
     def play_track(
         track_name: str,
         artist: str = "",
-        reveal: bool = False,
+        reveal: Optional[bool] = None,
         add_to_library: bool = False,
     ) -> str:
         """Play a track (macOS only).
@@ -2587,11 +2892,19 @@ if APPLESCRIPT_AVAILABLE:
         Args:
             track_name: Name of the track (partial match OK)
             artist: Artist name to disambiguate (also matches "feat. X")
-            reveal: Open catalog song in Music app (you click play)
+            reveal: Open catalog song in Music app when not in library (you click play).
+                   Uses user preference from config if not specified.
             add_to_library: Add catalog song to library, then auto-play
+
+        To set default: system(action="set-pref", preference="reveal_on_library_miss", value=True)
 
         Returns: Status message with [Source] prefix
         """
+        # Apply user preferences for reveal when library miss
+        if reveal is None:
+            prefs = get_user_preferences()
+            reveal = prefs["reveal_on_library_miss"]
+
         # Search library first (doesn't foreground Music)
         search_ok, lib_results = asc.search_library(track_name, "songs")
         if search_ok and lib_results:
@@ -2812,41 +3125,243 @@ if APPLESCRIPT_AVAILABLE:
         return f"Error: {result}"
 
     @mcp.tool()
-    def remove_from_playlist(playlist_name: str, track_name: str, artist: str = "") -> str:
-        """Remove a track from a playlist (macOS only).
+    def remove_from_playlist(
+        playlist_name: str,
+        track_name: str = "",
+        artist: str = "",
+        track_ids: str = "",
+        tracks: str = ""
+    ) -> str:
+        """Remove track(s) from a playlist (macOS only).
 
-        This only removes the track from the playlist, not from your library.
+        Supports multiple formats for maximum flexibility:
+
+        1. Single track by name:
+           remove_from_playlist(playlist_name="Road Trip", track_name="Hey Jude", artist="Beatles")
+
+        2. Multiple tracks, same artist:
+           remove_from_playlist(playlist_name="Road Trip", track_name="Hey Jude,Let It Be", artist="Beatles")
+
+        3. Single track by ID:
+           remove_from_playlist(playlist_name="Road Trip", track_ids="ABC123DEF456")
+
+        4. Multiple tracks by ID:
+           remove_from_playlist(playlist_name="Road Trip", track_ids="ABC123,DEF456,GHI789")
+
+        5. Multiple tracks, different artists (JSON):
+           remove_from_playlist(playlist_name="Mix", tracks='[{"name":"Hey Jude","artist":"Beatles"},{"name":"Bohemian","artist":"Queen"}]')
 
         Args:
             playlist_name: Name of the playlist
-            track_name: Name of the track to remove
-            artist: Optional artist name to disambiguate
+            track_name: Track name(s) - single or comma-separated (partial match)
+            artist: Artist name for all tracks (when using track_name, partial match)
+            track_ids: Persistent ID(s) - single or comma-separated (exact match)
+            tracks: JSON array of track objects with name/artist fields
+
+        Note: Provide EITHER track_name, track_ids, OR tracks parameter.
+        This only removes tracks from the playlist, not from your library.
 
         Returns: Confirmation message or error
         """
-        success, result = asc.remove_track_from_playlist(
-            playlist_name, track_name, artist if artist else None
-        )
-        if success:
-            return result
-        return f"Error: {result}"
+        results = []
+        errors = []
+
+        # Validate input
+        provided_params = sum([bool(track_name), bool(track_ids), bool(tracks)])
+        if provided_params == 0:
+            return "Error: Provide track_name, track_ids, or tracks parameter"
+        if provided_params > 1:
+            return "Error: Provide only ONE of: track_name, track_ids, or tracks"
+
+        # === MODE 1: Remove by ID(s) ===
+        if track_ids:
+            ids = [id.strip() for id in track_ids.split(",") if id.strip()]
+            for track_id in ids:
+                success, result = asc.remove_track_from_playlist(
+                    playlist_name,
+                    track_id=track_id
+                )
+                if success:
+                    results.append(result)
+                else:
+                    errors.append(f"ID {track_id}: {result}")
+
+        # === MODE 2: Remove by name(s) with shared artist ===
+        elif track_name:
+            names = [name.strip() for name in track_name.split(",") if name.strip()]
+            for name in names:
+                success, result = asc.remove_track_from_playlist(
+                    playlist_name,
+                    track_name=name,
+                    artist=artist if artist else None
+                )
+                if success:
+                    results.append(result)
+                else:
+                    errors.append(f"{name}: {result}")
+
+        # === MODE 3: Remove by JSON array (different artists) ===
+        elif tracks:
+            try:
+                import json
+                track_list = json.loads(tracks)
+                if not isinstance(track_list, list):
+                    return "Error: tracks must be a JSON array"
+
+                for track_obj in track_list:
+                    if not isinstance(track_obj, dict):
+                        errors.append("Invalid track object (must be dict)")
+                        continue
+                    name = track_obj.get("name", "")
+                    artist_name = track_obj.get("artist", "")
+                    if not name:
+                        errors.append("Track missing 'name' field")
+                        continue
+
+                    success, result = asc.remove_track_from_playlist(
+                        playlist_name,
+                        track_name=name,
+                        artist=artist_name if artist_name else None
+                    )
+                    if success:
+                        results.append(result)
+                    else:
+                        errors.append(f"{name}: {result}")
+
+            except json.JSONDecodeError as e:
+                return f"Error: Invalid JSON in tracks parameter: {str(e)}"
+
+        # Build response
+        output = []
+        if results:
+            output.append(f"✓ Removed {len(results)} track(s):")
+            for r in results:
+                output.append(f"  {r}")
+        if errors:
+            output.append(f"\n✗ Failed to remove {len(errors)} track(s):")
+            for e in errors:
+                output.append(f"  {e}")
+
+        if not output:
+            return "No tracks were removed"
+
+        return "\n".join(output)
 
     @mcp.tool()
-    def remove_from_library(track_name: str, artist: str = "") -> str:
-        """Remove a track from your library entirely (macOS only).
+    def remove_from_library(
+        track_name: str = "",
+        artist: str = "",
+        track_ids: str = "",
+        tracks: str = ""
+    ) -> str:
+        """Remove track(s) from your library entirely (macOS only).
 
-        This deletes the track from your library. Use with caution.
+        Supports multiple formats to match add_to_library:
+
+        1. Single track by name:
+           remove_from_library(track_name="Hey Jude", artist="Beatles")
+
+        2. Multiple tracks, same artist:
+           remove_from_library(track_name="Hey Jude,Let It Be", artist="Beatles")
+
+        3. Single track by ID:
+           remove_from_library(track_ids="ABC123DEF456")
+
+        4. Multiple tracks by ID:
+           remove_from_library(track_ids="ABC123,DEF456,GHI789")
+
+        5. Multiple tracks, different artists (JSON):
+           remove_from_library(tracks='[{"name":"Hey Jude","artist":"Beatles"},{"name":"Bohemian","artist":"Queen"}]')
 
         Args:
-            track_name: Name of the track to remove (partial match)
-            artist: Optional artist name to disambiguate
+            track_name: Track name(s) - single or comma-separated (partial match)
+            artist: Artist name for all tracks (when using track_name, partial match)
+            track_ids: Persistent ID(s) - single or comma-separated (exact match)
+            tracks: JSON array of track objects with name/artist fields
+
+        Warning: This DELETES tracks from your library permanently. Use with caution.
+        Note: Provide EITHER track_name, track_ids, OR tracks parameter.
 
         Returns: Confirmation message or error
         """
-        success, result = asc.remove_from_library(track_name, artist if artist else None)
-        if success:
-            return result
-        return f"Error: {result}"
+        results = []
+        errors = []
+
+        # Validate input
+        provided_params = sum([bool(track_name), bool(track_ids), bool(tracks)])
+        if provided_params == 0:
+            return "Error: Provide track_name, track_ids, or tracks parameter"
+        if provided_params > 1:
+            return "Error: Provide only ONE of: track_name, track_ids, or tracks"
+
+        # === MODE 1: Remove by ID(s) ===
+        if track_ids:
+            ids = [id.strip() for id in track_ids.split(",") if id.strip()]
+            for track_id in ids:
+                success, result = asc.remove_from_library(track_id=track_id)
+                if success:
+                    results.append(result)
+                else:
+                    errors.append(f"ID {track_id}: {result}")
+
+        # === MODE 2: Remove by name(s) with shared artist ===
+        elif track_name:
+            names = [name.strip() for name in track_name.split(",") if name.strip()]
+            for name in names:
+                success, result = asc.remove_from_library(
+                    track_name=name,
+                    artist=artist if artist else None
+                )
+                if success:
+                    results.append(result)
+                else:
+                    errors.append(f"{name}: {result}")
+
+        # === MODE 3: Remove by JSON array (different artists) ===
+        elif tracks:
+            try:
+                import json
+                track_list = json.loads(tracks)
+                if not isinstance(track_list, list):
+                    return "Error: tracks must be a JSON array"
+
+                for track_obj in track_list:
+                    if not isinstance(track_obj, dict):
+                        errors.append("Invalid track object (must be dict)")
+                        continue
+                    name = track_obj.get("name", "")
+                    artist_name = track_obj.get("artist", "")
+                    if not name:
+                        errors.append("Track missing 'name' field")
+                        continue
+
+                    success, result = asc.remove_from_library(
+                        track_name=name,
+                        artist=artist_name if artist_name else None
+                    )
+                    if success:
+                        results.append(result)
+                    else:
+                        errors.append(f"{name}: {result}")
+
+            except json.JSONDecodeError as e:
+                return f"Error: Invalid JSON in tracks parameter: {str(e)}"
+
+        # Build response
+        output = []
+        if results:
+            output.append(f"✓ Removed {len(results)} track(s) from library:")
+            for r in results:
+                output.append(f"  {r}")
+        if errors:
+            output.append(f"\n✗ Failed to remove {len(errors)} track(s):")
+            for e in errors:
+                output.append(f"  {e}")
+
+        if not output:
+            return "No tracks were removed"
+
+        return "\n".join(output)
 
     @mcp.tool()
     def get_player_state() -> str:

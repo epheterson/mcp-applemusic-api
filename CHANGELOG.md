@@ -5,6 +5,68 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.5] - 2025-12-22
+
+### Added
+
+- **Track metadata caching system** - Intelligent caching for stable track metadata:
+  - Dedicated `track_cache.py` module with clean interface
+  - Multi-ID indexing: caches by persistent IDs (AppleScript), library IDs (API), and catalog IDs (universal)
+  - Stores stable fields only: explicit status and ISRC
+  - Eliminates redundant API calls (90% reduction for repeated checks)
+  - Extensible design for adding more stable fields
+  - 10-20x speedup for subsequent playlist explicit status checks
+  - Cache persisted to `~/.cache/applemusic-mcp/track_cache.json`
+- **Explicit content tracking** - Comprehensive explicit status throughout:
+  - `[Explicit]` marker in all track output formats (text, JSON, CSV)
+  - `fetch_explicit=True` parameter for `get_playlist_tracks()` to fetch explicit status via API
+  - `clean_only=True` parameter for `search_catalog()` to filter explicit content
+  - AppleScript mode shows "Unknown" by default (contentRating not exposed)
+  - API mode shows accurate "Yes"/"No" explicit status
+- **User preferences system** - Set defaults for common parameters:
+  - `fetch_explicit` - always fetch explicit status (default: false)
+  - `reveal_on_library_miss` - auto-reveal catalog tracks in Music app (default: false)
+  - `clean_only` - filter explicit content in catalog searches (default: false)
+  - Set via `system(action="set-pref", preference="...", value=True/False)`
+  - View current preferences via `system()` info display
+  - Stored in `~/.config/applemusic-mcp/config.json`
+  - See `config.example.json` for format
+- **New `system` tool** - Comprehensive system configuration and cache management:
+  - `system()` - show preferences, track cache stats, and export files
+  - `system(action="set-pref", ...)` - update preferences
+  - `system(action="clear-tracks")` - clear track metadata cache separately
+  - `system(action="clear-exports")` - clear CSV/JSON export files separately
+  - Shows cache sizes, entry counts, file ages
+  - Replaces old `cache` tool with more intuitive naming
+- **Partial playlist matching** - Smart playlist name matching with exact-match priority:
+  - "Jack & Norah" now finds "🤟👶🎸 Jack & Norah"
+  - Exact matches always prioritized over partial matches
+  - Applied to all playlist operations via `_find_playlist_applescript()` helper
+- **Comprehensive documentation**:
+  - `CACHING.md` - Multi-ID caching architecture, E2E flow, performance analysis
+  - `COMPOSITE_KEYS.md` - Why we use composite keys for AppleScript ↔ API bridging
+  - `config.example.json` - Example configuration with preferences
+- **Test suite expansion** - 30 new tests (120 total: 26 track cache, 4 preferences)
+
+### Changed
+
+- **Error messages cleaned up** - Removed redundant playlist names from error responses
+- **Helpful guidance** - Error messages suggest `search_catalog` + `add_to_library` workflow when tracks not found
+- **Tool parameters** - `fetch_explicit`, `clean_only`, `reveal` now use `Optional[bool]` to support user preferences
+- **Asymmetry fixes** - Systematic review and fixes for add/remove inconsistencies:
+  - **`remove_from_playlist` enhanced**:
+    - **Partial matching fixed** - Now uses `contains` instead of `is` (no more exact match requirement!)
+    - **Array support** - Remove multiple tracks at once (comma-separated names, IDs, or JSON array)
+    - **ID-based removal** - Remove by persistent IDs via `track_ids` parameter
+    - **Better output** - Shows removed count, lists successes and failures separately
+  - **`remove_from_library` enhanced** - Now matches `add_to_library` capabilities:
+    - **Array support** - Remove multiple tracks: `track_name="Song1,Song2"` or `track_ids="ID1,ID2"`
+    - **ID-based removal** - Remove by persistent IDs via `track_ids` parameter
+    - **JSON array support** - Different artists: `tracks='[{"name":"Hey Jude","artist":"Beatles"}]'`
+    - **Flexible formats** - Same 5 modes as `remove_from_playlist`
+  - **`search_library` parameter standardized** - Renamed `search_type` → `types` to match `search_catalog`
+  - **`copy_playlist` name support** - Added `source_playlist_name` parameter for macOS users (matches other playlist operations)
+
 ## [0.2.4] - 2025-12-21
 
 ### Added

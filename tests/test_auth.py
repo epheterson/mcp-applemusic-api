@@ -202,3 +202,63 @@ class TestCreateAuthHtml:
 
         assert "musickit" in html.lower()
         assert "js-cdn.music.apple.com" in html
+
+
+class TestGetUserPreferences:
+    """Tests for get_user_preferences function."""
+
+    def test_returns_defaults_when_no_config(self, mock_config_dir):
+        """Should return default preferences when config doesn't exist."""
+        prefs = auth.get_user_preferences()
+
+        assert prefs["fetch_explicit"] is False
+        assert prefs["reveal_on_library_miss"] is False
+        assert prefs["clean_only"] is False
+
+    def test_returns_defaults_when_no_preferences_section(self, mock_config_dir, sample_config):
+        """Should return defaults when preferences section missing."""
+        config_file = mock_config_dir / "config.json"
+        with open(config_file, "w") as f:
+            json.dump(sample_config, f)
+
+        prefs = auth.get_user_preferences()
+
+        assert prefs["fetch_explicit"] is False
+        assert prefs["reveal_on_library_miss"] is False
+        assert prefs["clean_only"] is False
+
+    def test_returns_configured_preferences(self, mock_config_dir, sample_config):
+        """Should return configured preferences when set."""
+        config = sample_config.copy()
+        config["preferences"] = {
+            "fetch_explicit": True,
+            "reveal_on_library_miss": True,
+            "clean_only": False,
+        }
+        config_file = mock_config_dir / "config.json"
+        with open(config_file, "w") as f:
+            json.dump(config, f)
+
+        prefs = auth.get_user_preferences()
+
+        assert prefs["fetch_explicit"] is True
+        assert prefs["reveal_on_library_miss"] is True
+        assert prefs["clean_only"] is False
+
+    def test_handles_partial_preferences(self, mock_config_dir, sample_config):
+        """Should use defaults for missing preference keys."""
+        config = sample_config.copy()
+        config["preferences"] = {
+            "fetch_explicit": True,
+            # reveal_on_library_miss not set
+            # clean_only not set
+        }
+        config_file = mock_config_dir / "config.json"
+        with open(config_file, "w") as f:
+            json.dump(config, f)
+
+        prefs = auth.get_user_preferences()
+
+        assert prefs["fetch_explicit"] is True
+        assert prefs["reveal_on_library_miss"] is False  # default
+        assert prefs["clean_only"] is False  # default

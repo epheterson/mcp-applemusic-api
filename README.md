@@ -58,9 +58,21 @@ Create `~/.config/applemusic-mcp/config.json`:
 {
   "team_id": "YOUR_TEAM_ID",
   "key_id": "YOUR_KEY_ID",
-  "private_key_path": "~/.config/applemusic-mcp/AuthKey_XXXXXXXXXX.p8"
+  "private_key_path": "~/.config/applemusic-mcp/AuthKey_XXXXXXXXXX.p8",
+  "preferences": {
+    "fetch_explicit": false,
+    "reveal_on_library_miss": false,
+    "clean_only": false
+  }
 }
 ```
+
+**Optional preferences:**
+- `fetch_explicit`: Always fetch explicit content status via API (default: false)
+- `reveal_on_library_miss`: Auto-reveal catalog tracks in Music app (default: false)
+- `clean_only`: Filter explicit content in catalog searches (default: false)
+
+See `config.example.json` for full example.
 
 ### 3. Generate Tokens
 
@@ -107,32 +119,34 @@ Ask Claude things like:
 | Tool | Description | Method | Platform |
 |------|-------------|--------|----------|
 | `get_library_playlists` | List all playlists | API | All |
-| `get_playlist_tracks` | Get tracks with filter/limit | API or AS | All (by-name: macOS) |
+| `get_playlist_tracks` | Get tracks with filter/limit, optional explicit status | API or AS | All (by-name: macOS) |
 | `create_playlist` | Create new playlist | API | All |
 | `add_to_playlist` | Smart add: auto-adds to library, skips duplicates | API or AS | All (by-name: macOS) |
-| `copy_playlist` | Copy playlist to editable version | API | All |
-| `remove_from_playlist` | Remove track from playlist | AppleScript | macOS |
+| `copy_playlist` | Copy playlist to editable version (by ID or name) | API or AS | All (by-name: macOS) |
+| `remove_from_playlist` | Remove track(s): single, array, or by ID | AppleScript | macOS |
 | `delete_playlist` | Delete playlist | AppleScript | macOS |
 | `check_playlist` | Quick check if song/artist in playlist | API or AS | All |
 
 `add_to_playlist` accepts catalog IDs (auto-adds to library first) or library IDs. Duplicate checking is on by default. By-name mode uses AppleScript and can edit ANY playlist.
 
+`remove_from_playlist` and `remove_from_library` support multiple formats: single track by name/ID, comma-separated lists (`track_name="Song1,Song2"`), multiple IDs (`track_ids="ID1,ID2"`), or JSON arrays for different artists.
+
 ### Library
 | Tool | Description | Method | Platform |
 |------|-------------|--------|----------|
-| `search_library` | Search your library (fast local on macOS) | AS + API | All |
+| `search_library` | Search your library by types (fast local on macOS) | AS + API | All |
 | `browse_library` | List songs/albums/artists/videos by type | API | All |
 | `get_album_tracks` | Get tracks from album | API | All |
 | `get_recently_played` | Recent listening history | API | All |
 | `get_recently_added` | Recently added content | API | All |
 | `add_to_library` | Add song from catalog | API | All |
-| `remove_from_library` | Remove song from library | AppleScript | macOS |
+| `remove_from_library` | Remove song(s): single, array, or by ID | AppleScript | macOS |
 | `rating` | Love/dislike/get/set star ratings | API + AS | All (stars: macOS) |
 
 ### Catalog & Discovery
 | Tool | Description | Method | Platform |
 |------|-------------|--------|----------|
-| `search_catalog` | Search Apple Music | API | All |
+| `search_catalog` | Search Apple Music (optional explicit filter) | API | All |
 | `get_song_details` | Full song details | API | All |
 | `get_artist_details` | Artist info and discography | API | All |
 | `get_artist_top_songs` | Artist's popular songs | API | All |
@@ -164,9 +178,9 @@ Ask Claude things like:
 | Tool | Description | Method | Platform |
 |------|-------------|--------|----------|
 | `check_auth_status` | Verify tokens and API connection | API | All |
+| `system` | View/update preferences, clear cache/exports | Local | All |
 | `airplay` | List or switch AirPlay devices | AppleScript | macOS |
 | `reveal_in_music` | Show track in Music app | AppleScript | macOS |
-| `cache` | View or clear CSV cache | Local | All |
 
 ### Output Format
 

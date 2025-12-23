@@ -35,6 +35,31 @@ def _escape_for_applescript(s: str) -> str:
     return s.replace('\\', '\\\\').replace('"', '\\"')
 
 
+def _find_playlist_applescript(safe_name: str) -> str:
+    """Generate AppleScript code to find a playlist by name.
+
+    Tries exact match first, then falls back to partial match (contains).
+
+    Args:
+        safe_name: Already-escaped playlist name
+
+    Returns:
+        AppleScript code snippet that sets targetPlaylist variable
+    """
+    return f'''
+        try
+            -- Try exact match first
+            set targetPlaylist to first user playlist whose name is "{safe_name}"
+        on error
+            try
+                -- Fall back to partial match
+                set targetPlaylist to first user playlist whose name contains "{safe_name}"
+            on error
+                return "ERROR:Playlist not found"
+            end try
+        end try'''
+
+
 def run_applescript(script: str) -> tuple[bool, str]:
     """Execute AppleScript and return (success, output/error).
 
@@ -253,11 +278,7 @@ def get_playlist_tracks(playlist_name: str, limit: int = 500) -> tuple[bool, lis
     safe_name = _escape_for_applescript(playlist_name)
     script = f'''
     tell application "Music"
-        try
-            set targetPlaylist to first user playlist whose name is "{safe_name}"
-        on error
-            return "ERROR:Playlist not found: {safe_name}"
-        end try
+{_find_playlist_applescript(safe_name)}
 
         set output to ""
         set trackLimit to {limit}
@@ -359,13 +380,10 @@ def delete_playlist(playlist_name: str) -> tuple[bool, str]:
     safe_name = _escape_for_applescript(playlist_name)
     script = f'''
     tell application "Music"
-        try
-            set targetPlaylist to first user playlist whose name is "{safe_name}"
-            delete targetPlaylist
-            return "Deleted playlist: {safe_name}"
-        on error errMsg
-            return "ERROR:" & errMsg
-        end try
+{_find_playlist_applescript(safe_name)}
+        set playlistName to name of targetPlaylist
+        delete targetPlaylist
+        return "Deleted playlist: " & playlistName
     end tell
     '''
     success, output = run_applescript(script)
@@ -398,11 +416,7 @@ def track_exists_in_playlist(playlist_name: str, track_name: str, artist: Option
 
     script = f'''
     tell application "Music"
-        try
-            set targetPlaylist to first user playlist whose name is "{safe_playlist}"
-        on error
-            return "ERROR:Playlist not found"
-        end try
+{_find_playlist_applescript(safe_playlist)}
         set matchingTracks to (every track of targetPlaylist {track_filter})
         if (count of matchingTracks) > 0 then
             return "FOUND:" & name of (item 1 of matchingTracks) & " - " & artist of (item 1 of matchingTracks)
@@ -443,11 +457,7 @@ def add_track_to_playlist(playlist_name: str, track_name: str, artist: Optional[
 
     script = f'''
     tell application "Music"
-        try
-            set targetPlaylist to first user playlist whose name is "{safe_playlist}"
-        on error
-            return "ERROR:Playlist not found: {safe_playlist}"
-        end try
+{_find_playlist_applescript(safe_playlist)}
         try
             set targetTrack to {track_query}
         on error
@@ -463,41 +473,52 @@ def add_track_to_playlist(playlist_name: str, track_name: str, artist: Optional[
     return success, output
 
 
-def remove_track_from_playlist(playlist_name: str, track_name: str, artist: Optional[str] = None) -> tuple[bool, str]:
+def remove_track_from_playlist(
+    playlist_name: str,
+    track_name: str = "",
+    artist: Optional[str] = None,
+    track_id: Optional[str] = None
+) -> tuple[bool, str]:
     """Remove a track from a playlist (not from library).
 
     Args:
         playlist_name: Playlist to remove from
-        track_name: Name of the track to remove
-        artist: Optional artist name to disambiguate
+        track_name: Name of the track to remove (partial match supported)
+        artist: Optional artist name to disambiguate (partial match)
+        track_id: Optional persistent ID (exact match, overrides name/artist)
 
     Returns:
         Tuple of (success, message or error)
     """
     safe_playlist = _escape_for_applescript(playlist_name)
-    safe_track = _escape_for_applescript(track_name)
 
-    if artist:
-        safe_artist = _escape_for_applescript(artist)
-        track_filter = f'whose name is "{safe_track}" and artist contains "{safe_artist}"'
+    # Build track filter
+    if track_id:
+        # Remove by ID (exact match)
+        track_filter = f'whose persistent ID is "{track_id}"'
+    elif track_name:
+        # Remove by name (partial match)
+        safe_track = _escape_for_applescript(track_name)
+        if artist:
+            safe_artist = _escape_for_applescript(artist)
+            track_filter = f'whose name contains "{safe_track}" and artist contains "{safe_artist}"'
+        else:
+            track_filter = f'whose name contains "{safe_track}"'
     else:
-        track_filter = f'whose name is "{safe_track}"'
+        return False, "Must provide track_name or track_id"
 
     script = f'''
     tell application "Music"
-        try
-            set targetPlaylist to first user playlist whose name is "{safe_playlist}"
-        on error
-            return "ERROR:Playlist not found: {safe_playlist}"
-        end try
+{_find_playlist_applescript(safe_playlist)}
         try
             set targetTrack to (first track of targetPlaylist {track_filter})
         on error
-            return "ERROR:Track not found in playlist: {safe_track}"
+            return "ERROR:Track not found in playlist"
         end try
         set trackName to name of targetTrack
+        set trackArtist to artist of targetTrack
         delete targetTrack
-        return "Removed " & trackName & " from {safe_playlist}"
+        return "Removed " & trackName & " by " & trackArtist & " from {safe_playlist}"
     end tell
     '''
     success, output = run_applescript(script)
@@ -506,30 +527,42 @@ def remove_track_from_playlist(playlist_name: str, track_name: str, artist: Opti
     return success, output
 
 
-def remove_from_library(track_name: str, artist: Optional[str] = None) -> tuple[bool, str]:
+def remove_from_library(
+    track_name: str = "",
+    artist: Optional[str] = None,
+    track_id: Optional[str] = None
+) -> tuple[bool, str]:
     """Remove a track from the library entirely.
 
     Args:
-        track_name: Name of the track to remove
-        artist: Optional artist name to disambiguate
+        track_name: Name of the track to remove (partial match)
+        artist: Optional artist name to disambiguate (partial match)
+        track_id: Optional persistent ID (exact match, overrides name/artist)
 
     Returns:
         Tuple of (success, message or error)
     """
-    safe_track = _escape_for_applescript(track_name)
-
-    if artist:
-        safe_artist = _escape_for_applescript(artist)
-        track_filter = f'whose name contains "{safe_track}" and artist contains "{safe_artist}"'
+    # Build track filter
+    if track_id:
+        # Remove by ID (exact match)
+        track_filter = f'whose persistent ID is "{track_id}"'
+    elif track_name:
+        # Remove by name (partial match)
+        safe_track = _escape_for_applescript(track_name)
+        if artist:
+            safe_artist = _escape_for_applescript(artist)
+            track_filter = f'whose name contains "{safe_track}" and artist contains "{safe_artist}"'
+        else:
+            track_filter = f'whose name contains "{safe_track}"'
     else:
-        track_filter = f'whose name contains "{safe_track}"'
+        return False, "Must provide track_name or track_id"
 
     script = f'''
     tell application "Music"
         try
             set targetTrack to (first track of library playlist 1 {track_filter})
         on error
-            return "ERROR:Track not found in library: {safe_track}"
+            return "ERROR:Track not found in library"
         end try
         set trackName to name of targetTrack
         set trackArtist to artist of targetTrack
@@ -558,14 +591,10 @@ def play_playlist(playlist_name: str, shuffle: bool = False) -> tuple[bool, str]
 
     script = f'''
     tell application "Music"
-        try
-            set targetPlaylist to first user playlist whose name is "{safe_name}"
-        on error
-            return "ERROR:Playlist not found: {safe_name}"
-        end try
+{_find_playlist_applescript(safe_name)}
         {shuffle_cmd}
         play targetPlaylist
-        return "Now playing: {safe_name}"
+        return "Now playing: " & name of targetPlaylist
     end tell
     '''
     success, output = run_applescript(script)
@@ -731,12 +760,12 @@ def get_library_songs(limit: int = 100) -> tuple[bool, list[dict]]:
     return True, tracks
 
 
-def search_library(query: str, search_type: str = "all") -> tuple[bool, list[dict]]:
+def search_library(query: str, types: str = "all") -> tuple[bool, list[dict]]:
     """Search the local library.
 
     Args:
         query: Search query
-        search_type: Type of search - "all", "artists", "albums", "songs"
+        types: Type of search - "all", "artists", "albums", "songs"
 
     Returns:
         Tuple of (success, list of track dicts or error)
@@ -750,7 +779,7 @@ def search_library(query: str, search_type: str = "all") -> tuple[bool, list[dic
         "albums": "only albums",
         "songs": "only songs"
     }
-    search_modifier = search_map.get(search_type, "")
+    search_modifier = search_map.get(types, "")
 
     script = f'''
     tell application "Music"

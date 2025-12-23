@@ -32,6 +32,29 @@ def load_config() -> dict:
         return json.load(f)
 
 
+def get_user_preferences() -> dict:
+    """Get user preferences with defaults.
+
+    Returns:
+        dict with keys:
+        - fetch_explicit: bool (default False)
+        - reveal_on_library_miss: bool (default False)
+        - clean_only: bool (default False)
+    """
+    try:
+        config = load_config()
+        prefs = config.get("preferences", {})
+    except (FileNotFoundError, json.JSONDecodeError):
+        prefs = {}
+
+    # Return with defaults
+    return {
+        "fetch_explicit": prefs.get("fetch_explicit", False),
+        "reveal_on_library_miss": prefs.get("reveal_on_library_miss", False),
+        "clean_only": prefs.get("clean_only", False),
+    }
+
+
 def get_private_key_path(config: dict) -> Path:
     """Resolve the private key path from config."""
     path = Path(config["private_key_path"]).expanduser()

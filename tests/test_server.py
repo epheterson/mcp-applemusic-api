@@ -188,7 +188,7 @@ class TestAddToPlaylist:
         )
 
         result = server.add_to_playlist(
-            playlist_id="p.test123", track_ids="i.song1, i.song2, i.song3"
+            playlist="p.test123", ids="i.song1, i.song2, i.song3"
         )
 
         assert "Added" in result
@@ -205,9 +205,9 @@ class TestAddToPlaylist:
         with open(user_token_file, "w") as f:
             json.dump({"music_user_token": mock_user_token}, f)
 
-        result = server.add_to_playlist(playlist_id="p.test123", track_ids="")
+        result = server.add_to_playlist(playlist="p.test123", ids="")
 
-        assert "track_ids, track_name, or tracks" in result
+        assert "ids, track_name, or tracks" in result
 
 
 class TestSearchLibrary:
@@ -693,7 +693,7 @@ class TestAddToLibraryTool:
     def test_returns_error_for_empty_ids(self):
         """Should return error when no input provided."""
         result = server.add_to_library()
-        assert "Error: Provide catalog_ids, track_name, or tracks" in result
+        assert "Error: Provide ids, track_name, or tracks" in result
 
     @responses.activate
     def test_adds_songs_successfully(self, mock_config_dir, mock_developer_token, mock_user_token):

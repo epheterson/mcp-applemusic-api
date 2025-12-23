@@ -416,6 +416,60 @@ def _validate_track_object(track_obj: dict) -> tuple[str, str, str | None]:
     return name, artist, None
 
 
+def _detect_id_type(id_str: str) -> str:
+    """Detect the type of an Apple Music ID.
+
+    ID patterns:
+    - Catalog: all digits (e.g., "1440783617")
+    - Library: starts with "i." (e.g., "i.ABC123XYZ")
+    - Playlist: starts with "p." (e.g., "p.XYZ789ABC")
+    - Persistent: hex string, typically from AppleScript (e.g., "ABC123DEF456")
+
+    Args:
+        id_str: The ID string to classify
+
+    Returns:
+        One of: "catalog", "library", "playlist", "persistent"
+    """
+    id_str = id_str.strip()
+    if id_str.startswith("i."):
+        return "library"
+    elif id_str.startswith("p."):
+        return "playlist"
+    elif id_str.isdigit():
+        return "catalog"
+    else:
+        return "persistent"
+
+
+def _resolve_playlist(playlist: str) -> tuple[str | None, str | None, str | None]:
+    """Resolve a playlist parameter to either an ID or name.
+
+    Auto-detects based on pattern:
+    - Matches "p." + alphanumeric only → playlist ID (e.g., p.ABC123xyz)
+    - Otherwise → playlist name (for AppleScript lookup)
+
+    Args:
+        playlist: Either a playlist ID (p.XXX) or name
+
+    Returns:
+        Tuple of (playlist_id, playlist_name, error)
+        - If ID: (id, None, None)
+        - If name: (None, name, None)
+        - If empty: (None, None, error message)
+    """
+    playlist = playlist.strip()
+    if not playlist:
+        return None, None, "Error: playlist parameter required"
+
+    # Real playlist IDs are "p." followed by alphanumeric chars only (no spaces/punctuation)
+    # This correctly treats "p.s. I love you" as a name, not an ID
+    if playlist.startswith("p.") and len(playlist) > 2 and playlist[2:].isalnum():
+        return playlist, None, None
+    else:
+        return None, playlist, None
+
+
 def _build_track_results(
     results: list[str],
     errors: list[str],
@@ -521,11 +575,14 @@ def _search_catalog_songs(query: str, limit: int = 5) -> list[dict]:
     return []
 
 
-def _add_songs_to_library(catalog_ids: list[str]) -> tuple[bool, str]:
-    """Add songs to library by catalog ID.
+def _add_to_library_api(
+    catalog_ids: list[str], content_type: str = "songs"
+) -> tuple[bool, str]:
+    """Add content to library by catalog ID.
 
     Args:
-        catalog_ids: List of catalog song IDs
+        catalog_ids: List of catalog IDs
+        content_type: Type of content - "songs" (default) or "albums"
 
     Returns:
         Tuple of (success, message)
@@ -533,19 +590,32 @@ def _add_songs_to_library(catalog_ids: list[str]) -> tuple[bool, str]:
     if not catalog_ids:
         return False, "No catalog IDs provided"
 
+    # Map type to API parameter
+    type_param = {
+        "songs": "ids[songs]",
+        "albums": "ids[albums]",
+    }.get(content_type, "ids[songs]")
+
+    type_label = "song" if content_type == "songs" else "album"
+
     try:
         headers = get_headers()
         response = requests.post(
             f"{BASE_URL}/me/library",
             headers=headers,
-            params={"ids[songs]": ",".join(catalog_ids)},
+            params={type_param: ",".join(catalog_ids)},
             timeout=REQUEST_TIMEOUT,
         )
         if response.status_code in (200, 201, 202, 204):
-            return True, f"Added {len(catalog_ids)} song(s) to library"
+            return True, f"Added {len(catalog_ids)} {type_label}(s) to library"
         return False, f"API returned status {response.status_code}"
     except Exception as e:
         return False, str(e)
+
+
+def _add_songs_to_library(catalog_ids: list[str]) -> tuple[bool, str]:
+    """Add songs to library by catalog ID. (Legacy wrapper)"""
+    return _add_to_library_api(catalog_ids, "songs")
 
 
 def _rate_song_api(song_id: str, rating: str) -> tuple[bool, str]:
@@ -671,8 +741,7 @@ def get_library_playlists(
 
 @mcp.tool()
 def get_playlist_tracks(
-    playlist_id: str = "",
-    playlist_name: str = "",
+    playlist: str = "",
     filter: str = "",
     limit: int = 0,
     format: str = "text",
@@ -683,11 +752,12 @@ def get_playlist_tracks(
     """
     Get tracks in a playlist.
 
-    Provide EITHER playlist_id (API) OR playlist_name (AppleScript, macOS only).
+    Playlist parameter auto-detects:
+    - Starts with "p." → playlist ID (API mode, cross-platform)
+    - Otherwise → playlist name (AppleScript, macOS only)
 
     Args:
-        playlist_id: Playlist ID (from get_library_playlists)
-        playlist_name: Playlist name (macOS only, uses AppleScript)
+        playlist: Playlist ID (p.XXX) or name - auto-detected
         filter: Filter tracks by name/artist (case-insensitive substring match)
         limit: Max tracks (default: all). Specify to limit results for large playlists.
         format: "text" (default), "json", "csv", or "none" (export only)
@@ -696,7 +766,7 @@ def get_playlist_tracks(
         fetch_explicit: If True, fetch explicit status via API (uses cache for speed).
                        Uses user preference from config if not specified.
 
-    Note: When using playlist_name (AppleScript), explicit status defaults to "Unknown".
+    Note: When using playlist name (AppleScript), explicit status defaults to "Unknown".
     Set fetch_explicit=True to get accurate explicit info via API. Uses intelligent
     caching - first check is ~1-2 sec, subsequent checks are instant for known tracks.
 
@@ -704,6 +774,11 @@ def get_playlist_tracks(
 
     Returns: Track listing in requested format
     """
+    # Resolve playlist parameter
+    playlist_id, playlist_name, error = _resolve_playlist(playlist)
+    if error:
+        return error
+
     # Apply user preferences
     if fetch_explicit is None:
         prefs = get_user_preferences()
@@ -711,12 +786,6 @@ def get_playlist_tracks(
 
     use_api = bool(playlist_id)
     use_applescript = bool(playlist_name)
-
-    if use_api and use_applescript:
-        return "Error: Provide either playlist_id or playlist_name, not both"
-
-    if not use_api and not use_applescript:
-        return "Error: Provide playlist_id or playlist_name"
 
     # Use AppleScript with name
     if use_applescript:
@@ -922,29 +991,28 @@ def get_playlist_tracks(
 @mcp.tool()
 def search_playlist(
     query: str,
-    playlist_id: str = "",
-    playlist_name: str = "",
+    playlist: str = "",
 ) -> str:
     """
     Search for tracks in a playlist by name, artist, or album.
 
-    Provide EITHER playlist_id (API) OR playlist_name (AppleScript, macOS only).
-    AppleScript uses native Music app search (fast). API manually filters tracks.
+    Playlist parameter auto-detects:
+    - Starts with "p." → playlist ID (API mode, manual filtering)
+    - Otherwise → playlist name (AppleScript, native fast search)
 
     Args:
         query: Search term (matches name, artist, album, etc.)
-        playlist_id: Playlist ID (from get_library_playlists)
-        playlist_name: Playlist name (macOS only, uses native AppleScript search)
+        playlist: Playlist ID (p.XXX) or name - auto-detected
 
     Returns: List of matching tracks or "No matches"
     """
+    # Resolve playlist parameter
+    playlist_id, playlist_name, error = _resolve_playlist(playlist)
+    if error:
+        return error
+
     use_api = bool(playlist_id)
     use_applescript = bool(playlist_name)
-
-    if use_api and use_applescript:
-        return "Error: Provide either playlist_id or playlist_name, not both"
-    if not use_api and not use_applescript:
-        return "Error: Provide playlist_id or playlist_name"
 
     matches = []
 
@@ -995,15 +1063,10 @@ def _is_catalog_id(track_id: str) -> bool:
 
     Catalog IDs are purely numeric (e.g., "1440783617").
     Library IDs are either prefixed (i.XXX, l.XXX, p.XXX) or hexadecimal strings.
+
+    Uses _detect_id_type() internally for consistent ID classification.
     """
-    # Library IDs have known prefixes
-    if track_id.startswith(("i.", "l.", "p.")):
-        return False
-    # Catalog IDs are purely numeric
-    if track_id.isdigit():
-        return True
-    # Anything else (hex strings, etc.) is assumed to be a library ID
-    return False
+    return _detect_id_type(track_id) == "catalog"
 
 
 def _get_playlist_track_names(playlist_id: str) -> tuple[bool, list[dict] | str]:
@@ -1111,9 +1174,8 @@ def create_playlist(name: str, description: str = "") -> str:
 
 @mcp.tool()
 def add_to_playlist(
-    playlist_id: str = "",
-    track_ids: str = "",
-    playlist_name: str = "",
+    playlist: str = "",
+    ids: str = "",
     track_name: str = "",
     artist: str = "",
     tracks: str = "",
@@ -1131,53 +1193,50 @@ def add_to_playlist(
     - Optionally verifies the add succeeded
     - Works with ANY playlist on macOS via AppleScript
 
-    MODE 1 - By playlist ID (cross-platform, API-editable playlists only):
-        add_to_playlist(playlist_id="p.ABC123", track_ids="1440783617")  # catalog ID
-        add_to_playlist(playlist_id="p.ABC123", track_ids="i.XYZ789")    # library ID
+    Playlist parameter auto-detects:
+    - Starts with "p." → playlist ID (API mode, cross-platform)
+    - Otherwise → playlist name (AppleScript, macOS only)
 
-    MODE 2 - By playlist name (macOS only, works on ANY playlist):
-        add_to_playlist(playlist_name="Road Trip", track_name="Hey Jude", artist="The Beatles")
-        add_to_playlist(playlist_name="Road Trip", track_ids="1440783617")  # also works!
+    IDs parameter auto-detects:
+    - All digits → catalog ID (e.g., "1440783617")
+    - Starts with "i." → library ID (e.g., "i.XYZ789")
 
-    MODE 3 - Multiple tracks with different artists (JSON array):
-        add_to_playlist(playlist_name="Mix", tracks='[{"name":"Hey Jude","artist":"Beatles"},{"name":"Bohemian","artist":"Queen"}]')
+    Examples:
+        add_to_playlist(playlist="p.ABC123", ids="1440783617")       # API mode, catalog ID
+        add_to_playlist(playlist="Road Trip", ids="1440783617")      # AppleScript, catalog ID
+        add_to_playlist(playlist="Road Trip", track_name="Hey Jude") # AppleScript, by name
+        add_to_playlist(playlist="Mix", tracks='[{"name":"Hey Jude","artist":"Beatles"}]')
 
     Args:
-        playlist_id: Playlist ID (from get_library_playlists) - API mode
-        track_ids: Track IDs - catalog (numeric) or library IDs
-        playlist_name: Playlist name (macOS only, uses AppleScript)
+        playlist: Playlist ID (p.XXX) or name - auto-detected
+        ids: Track IDs - catalog (numeric) or library (i.XXX), auto-detected
         track_name: Track name (macOS only, for name-based matching, partial match supported)
         artist: Artist name (optional, helps with matching, partial match supported)
-        tracks: JSON array of track objects with name/artist fields (for multiple tracks with different artists)
+        tracks: JSON array of track objects with name/artist fields
         allow_duplicates: If False (default), skip tracks already in playlist
         verify: If True, verify track was added (slower but confirms success)
-        auto_search: Auto-search catalog and add to library if not found (uses preference if not specified, default: True)
+        auto_search: Auto-search catalog and add to library if not found (uses preference if not specified)
 
     Returns: Detailed result of what happened
     """
     steps = []  # Track what we did for verbose output
 
-    # Determine which mode - more flexible now
-    has_playlist_id = bool(playlist_id)
-    has_playlist_name = bool(playlist_name)
-    has_track_ids = bool(track_ids)
+    # Resolve playlist parameter
+    playlist_id, playlist_name, error = _resolve_playlist(playlist)
+    if error:
+        return error
+
+    has_ids = bool(ids)
     has_track_name = bool(track_name)
     has_tracks = bool(tracks)
 
-    # Validate combinations
-    if has_playlist_id and has_playlist_name:
-        return "Error: Provide either playlist_id or playlist_name, not both"
-
-    if not has_playlist_id and not has_playlist_name:
-        return "Error: Provide playlist_id or playlist_name"
-
-    if not has_track_ids and not has_track_name and not has_tracks:
-        return "Error: Provide track_ids, track_name, or tracks"
+    if not has_ids and not has_track_name and not has_tracks:
+        return "Error: Provide ids, track_name, or tracks"
 
     # === AppleScript mode (playlist by name) ===
-    if has_playlist_name:
+    if playlist_name:
         if not APPLESCRIPT_AVAILABLE:
-            return "Error: playlist_name requires macOS (use playlist_id for cross-platform)"
+            return "Error: Playlist name requires macOS (use playlist ID like 'p.XXX' for cross-platform)"
 
         # === MODE 3: JSON array of tracks ===
         if has_tracks:
@@ -1229,13 +1288,13 @@ def add_to_playlist(
             else:
                 return "No tracks added"
 
-        # If we have track_ids but not track_name, look up track info first
-        if has_track_ids and not has_track_name:
+        # If we have ids but not track_name, look up track info first
+        if has_ids and not has_track_name:
             headers = get_headers()
-            ids = _split_csv(track_ids)
+            id_list = _split_csv(ids)
             results = []
 
-            for track_id in ids:
+            for track_id in id_list:
                 # Get track info from catalog or library
                 if _is_catalog_id(track_id):
                     # Add to library first
@@ -1409,8 +1468,8 @@ def add_to_playlist(
                                         )
                                         if verify_response.status_code == 200:
                                             verify_data = verify_response.json()
-                                            track_ids = [t["id"] for t in verify_data.get("data", [])]
-                                            if library_id in track_ids:
+                                            verified_ids = [t["id"] for t in verify_data.get("data", [])]
+                                            if library_id in verified_ids:
                                                 steps.append(f"✓ Verified via API: Track in playlist")
 
                                         # Log and return for auto-search success
@@ -1444,7 +1503,7 @@ def add_to_playlist(
                 return (
                     f"Error: {result}\n\n"
                     f"💡 Tip: Use search_catalog(query='{catalog_search}') to find the catalog ID, "
-                    f"then call add_to_playlist again with track_ids=<catalog_id>. "
+                    f"then call add_to_playlist again with ids=<catalog_id>. "
                     f"Catalog tracks are automatically added to your library.\n"
                     f"Or enable auto_search preference: config(action='set-pref', preference='auto_search', value=True)"
                 )
@@ -1477,15 +1536,15 @@ def add_to_playlist(
     # === API mode (playlist by ID) ===
     try:
         headers = get_headers()
-        ids = _split_csv(track_ids)
-        if not ids:
+        id_list = _split_csv(ids)
+        if not id_list:
             return "Error: No track IDs provided"
 
         library_ids = []
         track_info = {}  # For verbose output
 
         # Process each ID - add to library if catalog ID
-        for track_id in ids:
+        for track_id in id_list:
             if _is_catalog_id(track_id):
                 # It's a catalog ID - need to add to library first
                 steps.append(f"Adding catalog ID {track_id} to library...")
@@ -1619,19 +1678,19 @@ def add_to_playlist(
 
 @mcp.tool()
 def copy_playlist(
-    source_playlist_id: str = "",
-    source_playlist_name: str = "",
+    source: str = "",
     new_name: str = ""
 ) -> str:
     """
     Copy a playlist to a new API-editable playlist.
     Use this to make an editable copy of a read-only playlist.
 
-    Provide EITHER source_playlist_id (API) OR source_playlist_name (macOS).
+    Source parameter auto-detects:
+    - Starts with "p." → playlist ID (API mode, cross-platform)
+    - Otherwise → playlist name (AppleScript, macOS only)
 
     Args:
-        source_playlist_id: ID of the playlist to copy (API mode)
-        source_playlist_name: Name of the playlist to copy (macOS only, uses AppleScript)
+        source: Source playlist ID (p.XXX) or name - auto-detected
         new_name: Name for the new playlist
 
     Returns: New playlist ID or error
@@ -1640,13 +1699,13 @@ def copy_playlist(
     if not new_name:
         return "Error: new_name is required"
 
+    # Resolve source playlist parameter
+    source_playlist_id, source_playlist_name, error = _resolve_playlist(source)
+    if error:
+        return error
+
     has_id = bool(source_playlist_id)
     has_name = bool(source_playlist_name)
-
-    if has_id and has_name:
-        return "Error: Provide either source_playlist_id or source_playlist_name, not both"
-    if not has_id and not has_name:
-        return "Error: Provide source_playlist_id or source_playlist_name"
 
     try:
         headers = get_headers()
@@ -1654,7 +1713,7 @@ def copy_playlist(
         # === AppleScript mode (by name) ===
         if has_name:
             if not APPLESCRIPT_AVAILABLE:
-                return "Error: source_playlist_name requires macOS (use source_playlist_id for cross-platform)"
+                return "Error: Playlist name requires macOS (use playlist ID like 'p.XXX' for cross-platform)"
 
             # Get tracks from source playlist via AppleScript
             success, source_tracks = asc.get_playlist_tracks(source_playlist_name)
@@ -1814,19 +1873,21 @@ def search_library(
 
 @mcp.tool()
 def add_to_library(
-    catalog_ids: str = "",
+    ids: str = "",
     track_name: str = "",
     artist: str = "",
     tracks: str = "",
+    type: str = "songs",
 ) -> str:
     """
-    Add songs from the Apple Music catalog to your personal library.
+    Add content from the Apple Music catalog to your personal library.
     After adding, use search_library to find the library IDs for playlist operations.
 
     Supports multiple formats:
 
     1. By catalog IDs (from search_catalog):
-       add_to_library(catalog_ids="1440783617,1440783618")
+       add_to_library(ids="1440783617,1440783618")
+       add_to_library(ids="1440783617", type="albums")  # Add album
 
     2. By name (searches catalog, takes first match):
        add_to_library(track_name="Hey Jude", artist="Beatles")
@@ -1838,15 +1899,22 @@ def add_to_library(
        add_to_library(tracks='[{"name":"Hey Jude","artist":"Beatles"},{"name":"Bohemian","artist":"Queen"}]')
 
     Args:
-        catalog_ids: Comma-separated catalog song IDs (from search_catalog)
+        ids: Comma-separated catalog IDs (from search_catalog or get_album_tracks)
         track_name: Track name(s) - single or comma-separated
         artist: Artist name for all tracks (when using track_name)
         tracks: JSON array of track objects with name/artist fields
+        type: Content type - "songs" (default) or "albums"
 
     Returns: Confirmation or error message
     """
     added = []
     errors = []
+
+    # Validate type parameter
+    if type not in ("songs", "albums"):
+        return f"Error: type must be 'songs' or 'albums', got '{type}'"
+
+    type_label = "song" if type == "songs" else "album"
 
     # Helper to add a song by catalog search
     def _add_by_search(name: str, search_artist: str) -> None:
@@ -1856,25 +1924,25 @@ def add_to_library(
             return
         attrs = song.get("attributes", {})
         catalog_id = song.get("id")
-        success, msg = _add_songs_to_library([catalog_id])
+        success, msg = _add_to_library_api([catalog_id], type)
         if success:
             added.append(f"{attrs.get('name', name)} by {attrs.get('artistName', 'Unknown')}")
         else:
             errors.append(f"{name}: {msg}")
 
     # === MODE 1: By catalog IDs ===
-    if catalog_ids:
-        ids = _split_csv(catalog_ids)
-        if not ids:
+    if ids:
+        id_list = _split_csv(ids)
+        if not id_list:
             return "No catalog IDs provided"
-        success, msg = _add_songs_to_library(ids)
+        success, msg = _add_to_library_api(id_list, type)
         if success:
             audit_log.log_action(
                 "add_to_library",
-                {"tracks": [f"catalog:{id}" for id in ids], "mode": "catalog_ids"},
-                undo_info={"catalog_ids": ids}
+                {"items": [f"catalog:{id}" for id in id_list], "type": type, "mode": "ids"},
+                undo_info={"ids": id_list, "type": type}
             )
-            return f"Successfully added {len(ids)} song(s) to your library. Use search_library to find their library IDs."
+            return f"Successfully added {len(id_list)} {type_label}(s) to your library."
         return f"API Error: {msg}"
 
     # === MODE 2: By track name(s) ===
@@ -1896,7 +1964,7 @@ def add_to_library(
             _add_by_search(name, track_artist)
 
     else:
-        return "Error: Provide catalog_ids, track_name, or tracks"
+        return "Error: Provide ids, track_name, or tracks"
 
     # Log successful additions
     if added:
@@ -3768,10 +3836,10 @@ if APPLESCRIPT_AVAILABLE:
 
     @mcp.tool()
     def remove_from_playlist(
-        playlist_name: str,
+        playlist: str = "",
         track_name: str = "",
         artist: str = "",
-        track_ids: str = "",
+        ids: str = "",
         tracks: str = ""
     ) -> str:
         """Remove track(s) from a playlist (macOS only).
@@ -3779,45 +3847,52 @@ if APPLESCRIPT_AVAILABLE:
         Supports multiple formats for maximum flexibility:
 
         1. Single track by name:
-           remove_from_playlist(playlist_name="Road Trip", track_name="Hey Jude", artist="Beatles")
+           remove_from_playlist(playlist="Road Trip", track_name="Hey Jude", artist="Beatles")
 
         2. Multiple tracks, same artist:
-           remove_from_playlist(playlist_name="Road Trip", track_name="Hey Jude,Let It Be", artist="Beatles")
+           remove_from_playlist(playlist="Road Trip", track_name="Hey Jude,Let It Be", artist="Beatles")
 
         3. Single track by ID:
-           remove_from_playlist(playlist_name="Road Trip", track_ids="ABC123DEF456")
+           remove_from_playlist(playlist="Road Trip", ids="ABC123DEF456")
 
         4. Multiple tracks by ID:
-           remove_from_playlist(playlist_name="Road Trip", track_ids="ABC123,DEF456,GHI789")
+           remove_from_playlist(playlist="Road Trip", ids="ABC123,DEF456,GHI789")
 
         5. Multiple tracks, different artists (JSON):
-           remove_from_playlist(playlist_name="Mix", tracks='[{"name":"Hey Jude","artist":"Beatles"},{"name":"Bohemian","artist":"Queen"}]')
+           remove_from_playlist(playlist="Mix", tracks='[{"name":"Hey Jude","artist":"Beatles"},{"name":"Bohemian","artist":"Queen"}]')
 
         Args:
-            playlist_name: Name of the playlist
+            playlist: Playlist name (macOS AppleScript-only, IDs not supported for removal)
             track_name: Track name(s) - single or comma-separated (partial match)
             artist: Artist name for all tracks (when using track_name, partial match)
-            track_ids: Persistent ID(s) - single or comma-separated (exact match)
+            ids: Persistent ID(s) - single or comma-separated (exact match)
             tracks: JSON array of track objects with name/artist fields
 
-        Note: Provide EITHER track_name, track_ids, OR tracks parameter.
+        Note: Provide EITHER track_name, ids, OR tracks parameter.
         This only removes tracks from the playlist, not from your library.
 
         Returns: Confirmation message or error
         """
+        # Resolve playlist (name-based only for removal)
+        playlist_id, playlist_name, error = _resolve_playlist(playlist)
+        if error:
+            return error
+        if playlist_id:
+            return "Error: Playlist removal requires playlist name (AppleScript), not ID"
+
         results = []
         errors = []
 
         # Validate input - exactly one mode must be provided
-        provided_params = sum([bool(track_name), bool(track_ids), bool(tracks)])
+        provided_params = sum([bool(track_name), bool(ids), bool(tracks)])
         if provided_params == 0:
-            return "Error: Provide track_name, track_ids, or tracks parameter"
+            return "Error: Provide track_name, ids, or tracks parameter"
         if provided_params > 1:
-            return "Error: Provide only ONE of: track_name, track_ids, or tracks"
+            return "Error: Provide only ONE of: track_name, ids, or tracks"
 
         # === MODE 1: Remove by ID(s) ===
-        if track_ids:
-            for track_id in _split_csv(track_ids):
+        if ids:
+            for track_id in _split_csv(ids):
                 success, result = asc.remove_track_from_playlist(
                     playlist_name,
                     track_id=track_id
@@ -3880,7 +3955,7 @@ if APPLESCRIPT_AVAILABLE:
     def remove_from_library(
         track_name: str = "",
         artist: str = "",
-        track_ids: str = "",
+        ids: str = "",
         tracks: str = ""
     ) -> str:
         """Remove track(s) from your library entirely (macOS only).
@@ -3894,10 +3969,10 @@ if APPLESCRIPT_AVAILABLE:
            remove_from_library(track_name="Hey Jude,Let It Be", artist="Beatles")
 
         3. Single track by ID:
-           remove_from_library(track_ids="ABC123DEF456")
+           remove_from_library(ids="ABC123DEF456")
 
         4. Multiple tracks by ID:
-           remove_from_library(track_ids="ABC123,DEF456,GHI789")
+           remove_from_library(ids="ABC123,DEF456,GHI789")
 
         5. Multiple tracks, different artists (JSON):
            remove_from_library(tracks='[{"name":"Hey Jude","artist":"Beatles"},{"name":"Bohemian","artist":"Queen"}]')
@@ -3905,11 +3980,11 @@ if APPLESCRIPT_AVAILABLE:
         Args:
             track_name: Track name(s) - single or comma-separated (partial match)
             artist: Artist name for all tracks (when using track_name, partial match)
-            track_ids: Persistent ID(s) - single or comma-separated (exact match)
+            ids: Persistent ID(s) - single or comma-separated (exact match)
             tracks: JSON array of track objects with name/artist fields
 
         Warning: This DELETES tracks from your library permanently. Use with caution.
-        Note: Provide EITHER track_name, track_ids, OR tracks parameter.
+        Note: Provide EITHER track_name, ids, OR tracks parameter.
 
         Returns: Confirmation message or error
         """
@@ -3917,15 +3992,15 @@ if APPLESCRIPT_AVAILABLE:
         errors = []
 
         # Validate input - exactly one mode must be provided
-        provided_params = sum([bool(track_name), bool(track_ids), bool(tracks)])
+        provided_params = sum([bool(track_name), bool(ids), bool(tracks)])
         if provided_params == 0:
-            return "Error: Provide track_name, track_ids, or tracks parameter"
+            return "Error: Provide track_name, ids, or tracks parameter"
         if provided_params > 1:
-            return "Error: Provide only ONE of: track_name, track_ids, or tracks"
+            return "Error: Provide only ONE of: track_name, ids, or tracks"
 
         # === MODE 1: Remove by ID(s) ===
-        if track_ids:
-            for track_id in _split_csv(track_ids):
+        if ids:
+            for track_id in _split_csv(ids):
                 success, result = asc.remove_from_library(track_id=track_id)
                 if success:
                     results.append(result)

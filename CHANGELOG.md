@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.10] - 2025-12-23
+
+### Changed
+
+- **Unified playlist parameters** - All playlist-related tools now accept a single `playlist` parameter:
+  - Starts with `p.` → playlist ID (API mode, cross-platform)
+  - Otherwise → playlist name (AppleScript, macOS only)
+  - Affects: `get_playlist_tracks`, `add_to_playlist`, `remove_from_playlist`, `search_playlist`
+  - `copy_playlist` uses `source` parameter with same auto-detection
+- **Unified ID parameters** - Simplified ID parameters across tools:
+  - `add_to_library`: `catalog_ids` → `ids` (auto-detects catalog/library IDs), added `type` param for albums
+  - `add_to_playlist`: `track_ids` → `ids` (auto-detects catalog/library IDs)
+  - `remove_from_playlist`: `track_ids` → `ids`
+  - `remove_from_library`: `track_ids` → `ids`
+- **ID auto-detection** - New `_detect_id_type()` helper identifies ID types:
+  - All digits → catalog ID
+  - Starts with `i.` → library ID
+  - Starts with `p.` → playlist ID
+  - Otherwise → persistent ID (hex)
+- **README features table sorted** - Double-checkmark features (both macOS and API) now listed first
+
 ## [0.2.9] - 2025-12-23
 
 ### Added

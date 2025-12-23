@@ -1,5 +1,7 @@
 # mcp-applemusic
 
+> **Unofficial** community project. Not affiliated with or endorsed by Apple.
+
 MCP server for Apple Music - manage playlists, control playback, browse your library.
 
 ## Features
@@ -10,12 +12,12 @@ MCP server for Apple Music - manage playlists, control playback, browse your lib
 | Browse library songs | ✓ | ✓ |
 | Create playlists | ✓ | ✓ |
 | Search library | ✓ | ✓ |
-| Search catalog |   | ✓ |
-| Add songs to library |   | ✓ |
-| Add tracks to playlists | ✓ | API-created |
-| Recommendations, charts, radio |   | ✓ |
 | Love/dislike tracks | ✓ | ✓ |
 | CSV/JSON export | ✓ | ✓ |
+| Add tracks to playlists | ✓ | API-created |
+| Search catalog |   | ✓ |
+| Add songs to library |   | ✓ |
+| Recommendations, charts, radio |   | ✓ |
 | Play tracks | ✓ |   |
 | Playback control (pause/skip/seek) | ✓ |   |
 | Volume, shuffle, repeat | ✓ |   |
@@ -131,7 +133,7 @@ Ask Claude things like:
 
 `add_to_playlist` accepts catalog IDs (auto-adds to library first) or library IDs. With `auto_search=True`, tracks not in your library are automatically found in the Apple Music catalog, added to your library, then added to the playlist—all in one call. Duplicate checking is on by default. By-name mode uses AppleScript and supports partial matching (e.g., "Give Up the Funk" finds "Give up the Funk (Tear the Roof Off the Sucker)").
 
-`remove_from_playlist` and `remove_from_library` support multiple formats: single track by name/ID, comma-separated lists (`track_name="Song1,Song2"`), multiple IDs (`track_ids="ID1,ID2"`), or JSON arrays for different artists.
+`remove_from_playlist` and `remove_from_library` support multiple formats: single track by name/ID, comma-separated lists (`track_name="Song1,Song2"`), multiple IDs (`ids="ID1,ID2"`), or JSON arrays for different artists.
 
 ### Library
 | Tool | Description | Method | Platform |
@@ -180,7 +182,7 @@ Ask Claude things like:
 | Tool | Description | Method | Platform |
 |------|-------------|--------|----------|
 | `check_auth_status` | Verify tokens and API connection | API | All |
-| `system` | View/update preferences, clear cache/exports | Local | All |
+| `config` | View/update preferences, clear cache/exports | Local | All |
 | `airplay` | List or switch AirPlay devices | AppleScript | macOS |
 | `reveal_in_music` | Show track in Music app | AppleScript | macOS |
 
@@ -228,7 +230,6 @@ Exported files are accessible via MCP resources (Claude Desktop can read these):
 | No playback control | Use Music app directly |
 
 ### Both Platforms
-- **Two ID types:** Catalog IDs (from `search_catalog`) for adding to library, Library IDs (from `search_library`) for adding to playlists
 - **Tokens expire:** Developer token lasts 180 days, run `applemusic-mcp generate-token` to renew
 
 ---

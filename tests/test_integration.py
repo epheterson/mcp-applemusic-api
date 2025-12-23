@@ -161,7 +161,7 @@ def test_array_removal():
 
         # The server function returns a string result, not (bool, str) tuple
         result = server_remove_from_playlist(
-            playlist_name=TEST_PLAYLIST,
+            playlist=TEST_PLAYLIST,
             track_name="Yesterday,Hey Jude",
             artist="The Beatles"
         )
@@ -291,9 +291,9 @@ def test_search_library_parameter():
 
 
 def test_copy_playlist_with_name():
-    """Test that copy_playlist supports source_playlist_name parameter."""
+    """Test that copy_playlist supports unified 'source' parameter (auto-detects ID vs name)."""
     print("\n" + "="*80)
-    print("TEST 7: copy_playlist Name Support")
+    print("TEST 7: copy_playlist Unified Source Parameter")
     print("="*80)
 
     # Check function signature
@@ -306,11 +306,15 @@ def test_copy_playlist_with_name():
 
     print(f"copy_playlist parameters: {params}")
 
-    if "source_playlist_name" in params:
-        print(f"✓ PASS: copy_playlist supports source_playlist_name parameter")
+    # v0.2.10+ uses unified 'source' parameter that auto-detects ID (p.XXX) vs name
+    if "source" in params:
+        print(f"✓ PASS: copy_playlist uses unified 'source' parameter (auto-detects ID vs name)")
         return True
+    elif "source_playlist_name" in params:
+        print(f"⚠ WARNING: copy_playlist still uses old source_playlist_name parameter")
+        return True  # Still works, just old API
     else:
-        print(f"✗ FAIL: copy_playlist missing source_playlist_name parameter")
+        print(f"✗ FAIL: copy_playlist missing source parameter")
         return False
 
 
@@ -342,14 +346,14 @@ def review_tool_outputs():
     if "not found" in result.lower():
         print("✓ Clear error message for track not found")
 
-    # Test 3: system tool output
-    print("\n--- Checking if system tool exists (renamed from cache) ---")
+    # Test 3: config tool output
+    print("\n--- Checking if config tool exists (renamed from system) ---")
     try:
         from applemusic_mcp import server
-        if hasattr(server, 'system'):
-            print("✓ system tool exists (cache renamed successfully)")
+        if hasattr(server, 'config'):
+            print("✓ config tool exists")
         else:
-            print("✗ system tool not found (cache rename may have failed)")
+            print("✗ config tool not found")
     except Exception as e:
         print(f"⚠ Could not check system tool: {e}")
 

@@ -11,8 +11,12 @@ and indexes it by all known IDs for maximum hit rate.
 """
 
 import json
+import logging
+import threading
 from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 def get_cache_dir() -> Path:
@@ -42,8 +46,8 @@ class TrackCache:
             try:
                 with open(self.cache_file, "r", encoding="utf-8") as f:
                     return json.load(f)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Failed to load track cache from {self.cache_file}: {e}")
         return {}
 
     def _save(self) -> None:
@@ -51,8 +55,8 @@ class TrackCache:
         try:
             with open(self.cache_file, "w", encoding="utf-8") as f:
                 json.dump(self._cache, f, indent=2)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Failed to save track cache to {self.cache_file}: {e}")
 
     def get_explicit(self, track_id: str) -> Optional[str]:
         """Get cached explicit status by any ID type.
@@ -110,13 +114,17 @@ class TrackCache:
         self._save()
 
 
-# Global cache instance
-_track_cache = None
+# Global cache instance with thread-safe initialization
+_track_cache: Optional[TrackCache] = None
+_track_cache_lock = threading.Lock()
 
 
 def get_track_cache() -> TrackCache:
-    """Get the global track cache instance."""
+    """Get the global track cache instance (thread-safe)."""
     global _track_cache
     if _track_cache is None:
-        _track_cache = TrackCache()
+        with _track_cache_lock:
+            # Double-check locking pattern
+            if _track_cache is None:
+                _track_cache = TrackCache()
     return _track_cache

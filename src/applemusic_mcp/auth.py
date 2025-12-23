@@ -41,6 +41,7 @@ def get_user_preferences() -> dict:
         - reveal_on_library_miss: bool (default False)
         - clean_only: bool (default False)
         - auto_search: bool (default False)
+        - storefront: str (default "us")
     """
     try:
         config = load_config()
@@ -54,6 +55,7 @@ def get_user_preferences() -> dict:
         "reveal_on_library_miss": prefs.get("reveal_on_library_miss", False),
         "clean_only": prefs.get("clean_only", False),
         "auto_search": prefs.get("auto_search", False),  # Default FALSE (don't modify library without permission)
+        "storefront": prefs.get("storefront", "us"),  # Apple Music region (default: US)
     }
 
 

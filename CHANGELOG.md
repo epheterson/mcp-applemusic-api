@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.8] - 2025-12-23
+
+### Added
+
+- **Configurable storefront via system tool** - Set your Apple Music region:
+  - `system(action="set-pref", preference="storefront", string_value="gb")` - Set UK region
+  - `system(action="list-storefronts")` - List all available regions
+  - `system()` - Now shows current storefront in preferences
+  - Supports all Apple Music storefronts (175+ countries)
+  - Enables non-US users to get localized catalog results
+- **`auto_search` preference now displayed** in `system()` info output
+
+### Changed
+
+- **Thread-safe track cache** - Singleton initialization now uses double-check locking pattern
+- **Named constants for play_track retry loop** - Magic numbers extracted to descriptive constants:
+  - `PLAY_TRACK_INITIAL_DELAY`, `PLAY_TRACK_RETRY_DELAY`, `PLAY_TRACK_MAX_ATTEMPTS`, `PLAY_TRACK_READD_AT_ATTEMPT`
+- **Consolidated storefront functionality** - `get_storefronts()` tool still available, but `system(action="list-storefronts")` preferred
+
+### Fixed
+
+- **Request timeouts** - All 51 API calls now have 30-second timeout (prevents indefinite hangs)
+- **Cache error logging** - Track cache load/save errors now logged instead of silently swallowed
+
 ## [0.2.7] - 2025-12-22
 
 ### Changed

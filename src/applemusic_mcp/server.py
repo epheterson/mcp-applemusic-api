@@ -295,7 +295,20 @@ def format_output(
 
 
 BASE_URL = "https://api.music.apple.com/v1"
-STOREFRONT = "us"
+DEFAULT_STOREFRONT = "us"
+REQUEST_TIMEOUT = 30  # seconds
+
+# play_track retry constants for iCloud sync
+PLAY_TRACK_INITIAL_DELAY = 1.0  # seconds before first retry
+PLAY_TRACK_RETRY_DELAY = 0.2  # seconds between retries
+PLAY_TRACK_MAX_ATTEMPTS = 45  # total retry attempts (~10 seconds)
+PLAY_TRACK_READD_AT_ATTEMPT = 20  # retry add at ~5s mark
+
+
+def get_storefront() -> str:
+    """Get storefront from preferences, defaulting to 'us'."""
+    prefs = get_user_preferences()
+    return prefs.get("storefront", DEFAULT_STOREFRONT)
 
 mcp = FastMCP("AppleMusicAPI")
 
@@ -374,9 +387,10 @@ def _search_catalog_songs(query: str, limit: int = 5) -> list[dict]:
     try:
         headers = get_headers()
         response = requests.get(
-            f"{BASE_URL}/catalog/{STOREFRONT}/search",
+            f"{BASE_URL}/catalog/{get_storefront()}/search",
             headers=headers,
             params={"term": query, "types": "songs", "limit": min(limit, 25)},
+            timeout=REQUEST_TIMEOUT,
         )
         if response.status_code == 200:
             data = response.json()
@@ -404,6 +418,7 @@ def _add_songs_to_library(catalog_ids: list[str]) -> tuple[bool, str]:
             f"{BASE_URL}/me/library",
             headers=headers,
             params={"ids[songs]": ",".join(catalog_ids)},
+            timeout=REQUEST_TIMEOUT,
         )
         if response.status_code in (200, 201, 202, 204):
             return True, f"Added {len(catalog_ids)} song(s) to library"
@@ -433,6 +448,7 @@ def _rate_song_api(song_id: str, rating: str) -> tuple[bool, str]:
             f"{BASE_URL}/me/ratings/songs/{song_id}",
             headers=headers,
             json=body,
+            timeout=REQUEST_TIMEOUT,
         )
         if response.status_code in (200, 201, 204):
             return True, f"Marked as {rating}"
@@ -491,6 +507,7 @@ def get_library_playlists(
                 f"{BASE_URL}/me/library/playlists",
                 headers=headers,
                 params={"limit": 100, "offset": offset},
+                timeout=REQUEST_TIMEOUT,
             )
             if response.status_code == 404:
                 break
@@ -629,7 +646,8 @@ def get_playlist_tracks(
                     response = requests.get(
                         f"{BASE_URL}/me/library/playlists",
                         headers=headers,
-                        params={"limit": 100}
+                        params={"limit": 100},
+                        timeout=REQUEST_TIMEOUT,
                     )
 
                     if response.status_code == 200:
@@ -652,7 +670,8 @@ def get_playlist_tracks(
                                 track_response = requests.get(
                                     f"{BASE_URL}/me/library/playlists/{api_playlist_id}/tracks",
                                     headers=headers,
-                                    params={"limit": 100, "offset": offset}
+                                    params={"limit": 100, "offset": offset},
+                                    timeout=REQUEST_TIMEOUT,
                                 )
                                 if track_response.status_code != 200:
                                     break
@@ -740,6 +759,7 @@ def get_playlist_tracks(
                 f"{BASE_URL}/me/library/playlists/{playlist_id}/tracks",
                 headers=headers,
                 params={"limit": 100, "offset": offset},
+                timeout=REQUEST_TIMEOUT,
             )
             if response.status_code == 404:
                 break
@@ -860,6 +880,7 @@ def _get_playlist_track_names(playlist_id: str) -> tuple[bool, list[dict] | str]
                 f"{BASE_URL}/me/library/playlists/{playlist_id}/tracks",
                 headers=headers,
                 params={"limit": 100, "offset": offset},
+                timeout=REQUEST_TIMEOUT,
             )
             if response.status_code == 404:
                 break
@@ -926,7 +947,7 @@ def create_playlist(name: str, description: str = "") -> str:
         body = {"attributes": {"name": name, "description": description}}
 
         response = requests.post(
-            f"{BASE_URL}/me/library/playlists", headers=headers, json=body
+            f"{BASE_URL}/me/library/playlists", headers=headers, json=body, timeout=REQUEST_TIMEOUT,
         )
         response.raise_for_status()
         data = response.json()
@@ -1016,11 +1037,11 @@ def add_to_playlist(
                     # Add to library first
                     steps.append(f"Adding catalog ID {track_id} to library...")
                     params = {"ids[songs]": track_id}
-                    requests.post(f"{BASE_URL}/me/library", headers=headers, params=params)
+                    requests.post(f"{BASE_URL}/me/library", headers=headers, params=params, timeout=REQUEST_TIMEOUT)
 
                     # Get catalog info
                     response = requests.get(
-                        f"{BASE_URL}/catalog/us/songs/{track_id}", headers=headers
+                        f"{BASE_URL}/catalog/us/songs/{track_id}", headers=headers, timeout=REQUEST_TIMEOUT,
                     )
                     if response.status_code != 200:
                         steps.append(f"  Error: Could not get info for {track_id}")
@@ -1034,7 +1055,7 @@ def add_to_playlist(
                 else:
                     # Library ID - look up info
                     response = requests.get(
-                        f"{BASE_URL}/me/library/songs/{track_id}", headers=headers
+                        f"{BASE_URL}/me/library/songs/{track_id}", headers=headers, timeout=REQUEST_TIMEOUT,
                     )
                     if response.status_code != 200:
                         steps.append(f"Error: Could not get info for {track_id}")
@@ -1099,7 +1120,8 @@ def add_to_playlist(
                 response = requests.get(
                     f"{BASE_URL}/catalog/us/search",
                     headers=headers,
-                    params={"term": catalog_search, "types": "songs", "limit": 3}
+                    params={"term": catalog_search, "types": "songs", "limit": 3},
+                    timeout=REQUEST_TIMEOUT,
                 )
 
                 if response.status_code == 200:
@@ -1121,14 +1143,16 @@ def add_to_playlist(
                         add_response = requests.post(
                             f"{BASE_URL}/me/library",
                             headers=headers,
-                            params={"ids[songs]": catalog_id}
+                            params={"ids[songs]": catalog_id},
+                            timeout=REQUEST_TIMEOUT,
                         )
 
                         if add_response.status_code in (200, 202):
                             # Get library ID from catalog song's library relationship (instant!)
                             lib_response = requests.get(
                                 f"{BASE_URL}/catalog/us/songs/{catalog_id}/library",
-                                headers=headers
+                                headers=headers,
+                                timeout=REQUEST_TIMEOUT,
                             )
 
                             library_id = None
@@ -1157,7 +1181,8 @@ def add_to_playlist(
                                     pl_add_response = requests.post(
                                         f"{BASE_URL}/me/library/playlists/{playlist_id}/tracks",
                                         headers=headers,
-                                        json={"data": [{"id": library_id, "type": "library-songs"}]}
+                                        json={"data": [{"id": library_id, "type": "library-songs"}]},
+                                        timeout=REQUEST_TIMEOUT,
                                     )
 
                                     if pl_add_response.status_code in (200, 201, 204):
@@ -1167,7 +1192,8 @@ def add_to_playlist(
                                         verify_response = requests.get(
                                             f"{BASE_URL}/me/library/playlists/{playlist_id}/tracks",
                                             headers=headers,
-                                            params={"limit": 100}
+                                            params={"limit": 100},
+                                            timeout=REQUEST_TIMEOUT,
                                         )
                                         if verify_response.status_code == 200:
                                             verify_data = verify_response.json()
@@ -1239,7 +1265,7 @@ def add_to_playlist(
                 # Add to library
                 params = {"ids[songs]": track_id}
                 response = requests.post(
-                    f"{BASE_URL}/me/library", headers=headers, params=params
+                    f"{BASE_URL}/me/library", headers=headers, params=params, timeout=REQUEST_TIMEOUT,
                 )
                 if response.status_code not in (200, 202):
                     steps.append(f"  Warning: library add returned {response.status_code}")
@@ -1248,6 +1274,7 @@ def add_to_playlist(
                 cat_response = requests.get(
                     f"{BASE_URL}/catalog/us/songs/{track_id}",
                     headers=headers,
+                    timeout=REQUEST_TIMEOUT,
                 )
                 if cat_response.status_code == 200:
                     cat_data = cat_response.json().get("data", [])
@@ -1266,6 +1293,7 @@ def add_to_playlist(
                                 f"{BASE_URL}/me/library/search",
                                 headers=headers,
                                 params={"term": name, "types": "library-songs", "limit": 25},
+                                timeout=REQUEST_TIMEOUT,
                             )
                             if lib_response.status_code == 200:
                                 lib_data = lib_response.json()
@@ -1302,6 +1330,7 @@ def add_to_playlist(
                     response = requests.get(
                         f"{BASE_URL}/me/library/songs/{lib_id}",
                         headers=headers,
+                        timeout=REQUEST_TIMEOUT,
                     )
                     if response.status_code == 200:
                         data = response.json().get("data", [])
@@ -1328,6 +1357,7 @@ def add_to_playlist(
             f"{BASE_URL}/me/library/playlists/{playlist_id}/tracks",
             headers=headers,
             json=body,
+            timeout=REQUEST_TIMEOUT,
         )
 
         if response.status_code == 204:
@@ -1422,6 +1452,7 @@ def copy_playlist(
                 f"{BASE_URL}/me/library/playlists/{source_playlist_id}/tracks",
                 headers=headers,
                 params={"limit": 100, "offset": offset},
+                timeout=REQUEST_TIMEOUT,
             )
             if response.status_code == 404:
                 break  # End of pagination or empty
@@ -1437,7 +1468,7 @@ def copy_playlist(
         # Create new playlist
         body = {"attributes": {"name": new_name}}
         response = requests.post(
-            f"{BASE_URL}/me/library/playlists", headers=headers, json=body
+            f"{BASE_URL}/me/library/playlists", headers=headers, json=body, timeout=REQUEST_TIMEOUT,
         )
         response.raise_for_status()
         new_id = response.json()["data"][0]["id"]
@@ -1451,6 +1482,7 @@ def copy_playlist(
                 f"{BASE_URL}/me/library/playlists/{new_id}/tracks",
                 headers=headers,
                 json={"data": track_data},
+                timeout=REQUEST_TIMEOUT,
             )
 
         return f"Created '{new_name}' (ID: {new_id}) with {len(all_tracks)} tracks"
@@ -1502,6 +1534,7 @@ def search_library(
             f"{BASE_URL}/me/library/search",
             headers=headers,
             params={"term": query, "types": "library-songs", "limit": min(limit, 25)},
+            timeout=REQUEST_TIMEOUT,
         )
         response.raise_for_status()
         data = response.json()
@@ -1570,6 +1603,7 @@ def get_recently_played(
                 f"{BASE_URL}/me/recent/played/tracks",
                 headers=headers,
                 params={"limit": batch_limit, "offset": offset},
+                timeout=REQUEST_TIMEOUT,
             )
             if response.status_code != 200:
                 break
@@ -1628,9 +1662,10 @@ def search_catalog(
     try:
         headers = get_headers()
         response = requests.get(
-            f"{BASE_URL}/catalog/{STOREFRONT}/search",
+            f"{BASE_URL}/catalog/{get_storefront()}/search",
             headers=headers,
             params={"term": query, "types": types, "limit": min(limit, 25)},
+            timeout=REQUEST_TIMEOUT,
         )
         response.raise_for_status()
         data = response.json()
@@ -1736,7 +1771,7 @@ def get_album_tracks(
         if album_id.startswith("l."):
             base_url = f"{BASE_URL}/me/library/albums/{album_id}/tracks"
         else:
-            base_url = f"{BASE_URL}/catalog/{STOREFRONT}/albums/{album_id}/tracks"
+            base_url = f"{BASE_URL}/catalog/{get_storefront()}/albums/{album_id}/tracks"
 
         # Paginate to handle box sets / compilations with 100+ tracks
         all_tracks = []
@@ -1747,6 +1782,7 @@ def get_album_tracks(
                 base_url,
                 headers=headers,
                 params={"limit": 100, "offset": offset},
+                timeout=REQUEST_TIMEOUT,
             )
             if response.status_code == 404:
                 break
@@ -1846,6 +1882,7 @@ def browse_library(
                 url,
                 headers=headers,
                 params={"limit": batch_limit, "offset": offset},
+                timeout=REQUEST_TIMEOUT,
             )
             if response.status_code == 404:
                 break
@@ -1916,6 +1953,7 @@ def get_recommendations(
             f"{BASE_URL}/me/recommendations",
             headers=headers,
             params={"limit": 10},
+            timeout=REQUEST_TIMEOUT,
         )
         response.raise_for_status()
         data = response.json()
@@ -1967,6 +2005,7 @@ def get_heavy_rotation(
         response = requests.get(
             f"{BASE_URL}/me/history/heavy-rotation",
             headers=headers,
+            timeout=REQUEST_TIMEOUT,
         )
         response.raise_for_status()
         data = response.json()
@@ -2032,6 +2071,7 @@ def get_recently_added(
                 f"{BASE_URL}/me/library/recently-added",
                 headers=headers,
                 params={"limit": batch_limit, "offset": offset},
+                timeout=REQUEST_TIMEOUT,
             )
             if response.status_code == 404:
                 break
@@ -2088,9 +2128,10 @@ def get_artist_top_songs(artist_name: str) -> str:
 
         # Search for artist first
         search_response = requests.get(
-            f"{BASE_URL}/catalog/{STOREFRONT}/search",
+            f"{BASE_URL}/catalog/{get_storefront()}/search",
             headers=headers,
             params={"term": artist_name, "types": "artists", "limit": 1},
+            timeout=REQUEST_TIMEOUT,
         )
         search_response.raise_for_status()
         artists = search_response.json().get("results", {}).get("artists", {}).get("data", [])
@@ -2104,8 +2145,9 @@ def get_artist_top_songs(artist_name: str) -> str:
 
         # Get top songs
         response = requests.get(
-            f"{BASE_URL}/catalog/{STOREFRONT}/artists/{artist_id}/view/top-songs",
+            f"{BASE_URL}/catalog/{get_storefront()}/artists/{artist_id}/view/top-songs",
             headers=headers,
+            timeout=REQUEST_TIMEOUT,
         )
         response.raise_for_status()
         songs = response.json().get("data", [])
@@ -2141,9 +2183,10 @@ def get_similar_artists(artist_name: str) -> str:
 
         # Search for artist first
         search_response = requests.get(
-            f"{BASE_URL}/catalog/{STOREFRONT}/search",
+            f"{BASE_URL}/catalog/{get_storefront()}/search",
             headers=headers,
             params={"term": artist_name, "types": "artists", "limit": 1},
+            timeout=REQUEST_TIMEOUT,
         )
         search_response.raise_for_status()
         artists = search_response.json().get("results", {}).get("artists", {}).get("data", [])
@@ -2157,8 +2200,9 @@ def get_similar_artists(artist_name: str) -> str:
 
         # Get similar artists
         response = requests.get(
-            f"{BASE_URL}/catalog/{STOREFRONT}/artists/{artist_id}/view/similar-artists",
+            f"{BASE_URL}/catalog/{get_storefront()}/artists/{artist_id}/view/similar-artists",
             headers=headers,
+            timeout=REQUEST_TIMEOUT,
         )
         response.raise_for_status()
         similar = response.json().get("data", [])
@@ -2193,8 +2237,9 @@ def get_song_station(song_id: str) -> str:
         headers = get_headers()
 
         response = requests.get(
-            f"{BASE_URL}/catalog/{STOREFRONT}/songs/{song_id}/station",
+            f"{BASE_URL}/catalog/{get_storefront()}/songs/{song_id}/station",
             headers=headers,
+            timeout=REQUEST_TIMEOUT,
         )
         response.raise_for_status()
         data = response.json()
@@ -2317,8 +2362,9 @@ def get_song_details(song_id: str) -> str:
     try:
         headers = get_headers()
         response = requests.get(
-            f"{BASE_URL}/catalog/{STOREFRONT}/songs/{song_id}",
+            f"{BASE_URL}/catalog/{get_storefront()}/songs/{song_id}",
             headers=headers,
+            timeout=REQUEST_TIMEOUT,
         )
         response.raise_for_status()
         data = response.json()
@@ -2363,9 +2409,10 @@ def get_artist_details(artist_name: str) -> str:
 
         # First search for the artist
         search_response = requests.get(
-            f"{BASE_URL}/catalog/{STOREFRONT}/search",
+            f"{BASE_URL}/catalog/{get_storefront()}/search",
             headers=headers,
             params={"term": artist_name, "types": "artists", "limit": 1},
+            timeout=REQUEST_TIMEOUT,
         )
         search_response.raise_for_status()
         search_data = search_response.json()
@@ -2386,9 +2433,10 @@ def get_artist_details(artist_name: str) -> str:
 
         # Get artist's albums
         albums_response = requests.get(
-            f"{BASE_URL}/catalog/{STOREFRONT}/artists/{artist_id}/albums",
+            f"{BASE_URL}/catalog/{get_storefront()}/artists/{artist_id}/albums",
             headers=headers,
             params={"limit": 10},
+            timeout=REQUEST_TIMEOUT,
         )
         if albums_response.status_code == 200:
             albums_data = albums_response.json()
@@ -2423,9 +2471,10 @@ def get_charts(chart_type: str = "songs") -> str:
     try:
         headers = get_headers()
         response = requests.get(
-            f"{BASE_URL}/catalog/{STOREFRONT}/charts",
+            f"{BASE_URL}/catalog/{get_storefront()}/charts",
             headers=headers,
             params={"types": chart_type, "limit": 20},
+            timeout=REQUEST_TIMEOUT,
         )
         response.raise_for_status()
         data = response.json()
@@ -2470,15 +2519,17 @@ def get_music_videos(query: str = "") -> str:
 
         if query:
             response = requests.get(
-                f"{BASE_URL}/catalog/{STOREFRONT}/search",
+                f"{BASE_URL}/catalog/{get_storefront()}/search",
                 headers=headers,
                 params={"term": query, "types": "music-videos", "limit": 15},
+                timeout=REQUEST_TIMEOUT,
             )
         else:
             response = requests.get(
-                f"{BASE_URL}/catalog/{STOREFRONT}/charts",
+                f"{BASE_URL}/catalog/{get_storefront()}/charts",
                 headers=headers,
                 params={"types": "music-videos", "limit": 15},
+                timeout=REQUEST_TIMEOUT,
             )
 
         response.raise_for_status()
@@ -2519,9 +2570,10 @@ def get_genres() -> str:
     try:
         headers = get_headers()
         response = requests.get(
-            f"{BASE_URL}/catalog/{STOREFRONT}/genres",
+            f"{BASE_URL}/catalog/{get_storefront()}/genres",
             headers=headers,
             params={"limit": 50},
+            timeout=REQUEST_TIMEOUT,
         )
         response.raise_for_status()
         data = response.json()
@@ -2555,9 +2607,10 @@ def get_search_suggestions(term: str) -> str:
     try:
         headers = get_headers()
         response = requests.get(
-            f"{BASE_URL}/catalog/{STOREFRONT}/search/suggestions",
+            f"{BASE_URL}/catalog/{get_storefront()}/search/suggestions",
             headers=headers,
             params={"term": term, "kinds": "terms", "limit": 10},
+            timeout=REQUEST_TIMEOUT,
         )
         response.raise_for_status()
         data = response.json()
@@ -2591,6 +2644,7 @@ def get_storefronts() -> str:
         response = requests.get(
             f"{BASE_URL}/storefronts",
             headers=headers,
+            timeout=REQUEST_TIMEOUT,
         )
         response.raise_for_status()
         data = response.json()
@@ -2622,9 +2676,10 @@ def get_personal_station() -> str:
     try:
         headers = get_headers()
         response = requests.get(
-            f"{BASE_URL}/catalog/{STOREFRONT}/stations",
+            f"{BASE_URL}/catalog/{get_storefront()}/stations",
             headers=headers,
             params={"filter[identity]": "personal"},
+            timeout=REQUEST_TIMEOUT,
         )
         response.raise_for_status()
         data = response.json()
@@ -2662,27 +2717,32 @@ def system(
     action: str = "info",
     days_old: int = 0,
     preference: str = "",
-    value: Optional[bool] = None
+    value: Optional[bool] = None,
+    string_value: str = "",
 ) -> str:
     """
     System configuration, preferences, and cache management.
 
     Actions:
         - info (default): Show preferences, cache stats, and export files
-        - set-pref: Update a preference (requires preference and value params)
+        - set-pref: Update a preference (requires preference and value/string_value params)
+        - list-storefronts: Show available Apple Music storefronts (regions)
         - clear-tracks: Clear track metadata cache
         - clear-exports: Delete CSV/JSON export files (optionally by age)
 
     Args:
-        action: One of: info, set-pref, clear-tracks, clear-exports
+        action: One of: info, set-pref, list-storefronts, clear-tracks, clear-exports
         days_old: When clearing exports, only delete files older than this (0 = all)
-        preference: For set-pref: fetch_explicit, reveal_on_library_miss, clean_only, or auto_search
-        value: For set-pref: true or false
+        preference: For set-pref: fetch_explicit, reveal_on_library_miss, clean_only, auto_search, or storefront
+        value: For set-pref (bool prefs): true or false
+        string_value: For set-pref (string prefs like storefront): e.g., "us", "gb", "de"
 
     Examples:
         system()  # Show everything
         system(action="set-pref", preference="fetch_explicit", value=True)
         system(action="set-pref", preference="auto_search", value=True)  # Enable auto-search
+        system(action="set-pref", preference="storefront", string_value="gb")  # Set UK storefront
+        system(action="list-storefronts")  # List all available regions
         system(action="clear-tracks")  # Clear track metadata cache
         system(action="clear-exports", days_old=7)  # Clear old exports
 
@@ -2693,12 +2753,25 @@ def system(
 
         # === SET PREFERENCE ===
         if action == "set-pref":
-            if not preference or value is None:
-                return "Error: set-pref requires both 'preference' and 'value' parameters"
+            bool_prefs = ["fetch_explicit", "reveal_on_library_miss", "clean_only", "auto_search"]
+            string_prefs = ["storefront"]
+            all_prefs = bool_prefs + string_prefs
 
-            valid_prefs = ["fetch_explicit", "reveal_on_library_miss", "clean_only", "auto_search"]
-            if preference not in valid_prefs:
-                return f"Error: preference must be one of: {', '.join(valid_prefs)}"
+            if not preference:
+                return f"Error: set-pref requires 'preference' parameter. Valid: {', '.join(all_prefs)}"
+
+            if preference not in all_prefs:
+                return f"Error: preference must be one of: {', '.join(all_prefs)}"
+
+            # Determine the value to set
+            if preference in string_prefs:
+                if not string_value:
+                    return f"Error: '{preference}' requires 'string_value' parameter (e.g., string_value='gb')"
+                pref_value = string_value.lower()
+            else:
+                if value is None:
+                    return f"Error: '{preference}' requires 'value' parameter (true or false)"
+                pref_value = value
 
             # Load current config
             from .auth import load_config, get_config_dir as get_auth_config_dir
@@ -2710,14 +2783,40 @@ def system(
             # Update preferences
             if "preferences" not in config:
                 config["preferences"] = {}
-            config["preferences"][preference] = value
+            config["preferences"][preference] = pref_value
 
             # Save back
             config_file = get_auth_config_dir() / "config.json"
             with open(config_file, "w") as f:
                 json.dump(config, f, indent=2)
 
-            return f"✓ Updated: {preference} = {value}\n\nUse system() to see current preferences."
+            return f"✓ Updated: {preference} = {pref_value}\n\nUse system() to see current preferences."
+
+        # === LIST STOREFRONTS ===
+        if action == "list-storefronts":
+            try:
+                headers = get_headers()
+                response = requests.get(
+                    f"{BASE_URL}/storefronts",
+                    headers=headers,
+                    timeout=REQUEST_TIMEOUT,
+                )
+                response.raise_for_status()
+                data = response.json()
+
+                output = ["=== Available Storefronts ===", ""]
+                for storefront in data.get("data", []):
+                    sf_id = storefront.get("id", "")
+                    attrs = storefront.get("attributes", {})
+                    name = attrs.get("name", "Unknown")
+                    output.append(f"  {sf_id}: {name}")
+
+                output.append("")
+                output.append(f"Current: {get_storefront()}")
+                output.append("Set via: system(action='set-pref', preference='storefront', string_value='xx')")
+                return "\n".join(output)
+            except Exception as e:
+                return f"Error listing storefronts: {e}"
 
         # === CLEAR TRACK CACHE ===
         if action == "clear-tracks":
@@ -2773,9 +2872,11 @@ def system(
             # User Preferences
             prefs = get_user_preferences()
             output.append("Preferences (set via system(action='set-pref', ...)):")
+            output.append(f"  storefront: {prefs['storefront']} (list: system(action='list-storefronts'))")
             output.append(f"  fetch_explicit: {prefs['fetch_explicit']}")
             output.append(f"  reveal_on_library_miss: {prefs['reveal_on_library_miss']}")
             output.append(f"  clean_only: {prefs['clean_only']}")
+            output.append(f"  auto_search: {prefs['auto_search']}")
             output.append("")
 
             # Track Metadata Cache
@@ -2860,6 +2961,7 @@ def test_output_size(target_chars: int = 50000) -> str:
             f"{BASE_URL}/me/library/playlists",
             headers=headers,
             params={"limit": 100},
+            timeout=REQUEST_TIMEOUT,
         )
         response.raise_for_status()
         playlists = response.json().get("data", [])
@@ -2888,6 +2990,7 @@ def test_output_size(target_chars: int = 50000) -> str:
                     f"{BASE_URL}/me/library/playlists/{playlist_id}/tracks",
                     headers=headers,
                     params={"limit": 100},
+                    timeout=REQUEST_TIMEOUT,
                 )
                 track_response.raise_for_status()
                 tracks = track_response.json().get("data", [])
@@ -2968,7 +3071,7 @@ def check_auth_status() -> str:
         try:
             headers = get_headers()
             response = requests.get(
-                f"{BASE_URL}/me/library/playlists", headers=headers, params={"limit": 1}
+                f"{BASE_URL}/me/library/playlists", headers=headers, params={"limit": 1}, timeout=REQUEST_TIMEOUT,
             )
             if response.status_code == 200:
                 status.append("API Connection: OK")
@@ -3064,13 +3167,13 @@ if APPLESCRIPT_AVAILABLE:
             if add_to_library:
                 add_ok, add_msg = _add_songs_to_library([catalog_id])
                 if add_ok:
-                    # Wait for iCloud sync, then play (up to ~10 seconds)
-                    time.sleep(1)  # Initial delay for sync to start
-                    for attempt in range(45):
+                    # Wait for iCloud sync, then play
+                    time.sleep(PLAY_TRACK_INITIAL_DELAY)
+                    for attempt in range(PLAY_TRACK_MAX_ATTEMPTS):
                         if attempt > 0:
-                            time.sleep(0.2)
+                            time.sleep(PLAY_TRACK_RETRY_DELAY)
                         # Retry add at ~5s mark in case first silently failed
-                        if attempt == 20:
+                        if attempt == PLAY_TRACK_READD_AT_ATTEMPT:
                             _add_songs_to_library([catalog_id])
                         success, result = asc.play_track(song_name, song_artist)
                         if success:

@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.7] - 2025-12-22
+
+### Changed
+
+- **`check_playlist` → `search_playlist`** - Renamed for clarity and enhanced:
+  - Uses native AppleScript search on macOS (fast, same as Music app search field)
+  - API path manually filters tracks (cross-platform support maintained)
+  - Now searches album field in addition to name/artist
+  - Better name reflects actual functionality
+
+### Fixed
+
+- **Album search** - API path now searches album field (was missing)
+
 ## [0.2.6] - 2025-12-22
 
 ### Added

@@ -576,6 +576,112 @@ def remove_from_library(
     return success, output
 
 
+def search_playlist(playlist_name: str, query: str) -> tuple[bool, list[dict]]:
+    """Search for tracks in a playlist using native AppleScript search.
+
+    Uses Music app's native search (same as typing in search field).
+    Much faster than manually iterating through all tracks.
+
+    Args:
+        playlist_name: Name of the playlist to search
+        query: Search term (matches name, artist, album, etc.)
+
+    Returns:
+        Tuple of (success, list of matching tracks or error message)
+    """
+    safe_name = _escape_for_applescript(playlist_name)
+    safe_query = _escape_for_applescript(query)
+
+    script = f'''
+    tell application "Music"
+{_find_playlist_applescript(safe_name)}
+        set foundTracks to search targetPlaylist for "{safe_query}"
+        set output to ""
+        repeat with t in foundTracks
+            set trackName to name of t
+            set trackArtist to artist of t
+            set trackAlbum to album of t
+            set trackId to persistent ID of t
+            set output to output & trackName & "|||" & trackArtist & "|||" & trackAlbum & "|||" & trackId & "\\n"
+        end repeat
+        return output
+    end tell
+    '''
+    success, output = run_applescript(script)
+
+    if not success:
+        return False, output
+
+    if output.startswith("ERROR:"):
+        return False, output[6:]
+
+    # Parse results
+    tracks = []
+    for line in output.strip().split("\n"):
+        if not line:
+            continue
+        parts = line.split("|||")
+        if len(parts) >= 4:
+            tracks.append({
+                "name": parts[0],
+                "artist": parts[1],
+                "album": parts[2],
+                "id": parts[3],
+            })
+
+    return True, tracks
+
+
+def download_tracks(track_ids: str = "", playlist_name: str = "") -> tuple[bool, str]:
+    """Download cloud tracks or playlist for offline playback.
+
+    Args:
+        track_ids: Comma-separated persistent IDs to download
+        playlist_name: Name of playlist to download all tracks from
+
+    Returns:
+        Tuple of (success, message or error)
+    """
+    if track_ids and playlist_name:
+        return False, "Error: Provide either track_ids or playlist_name, not both"
+    if not track_ids and not playlist_name:
+        return False, "Error: Provide track_ids or playlist_name"
+
+    if playlist_name:
+        # Download entire playlist
+        safe_name = _escape_for_applescript(playlist_name)
+        script = f'''
+        tell application "Music"
+{_find_playlist_applescript(safe_name)}
+            download targetPlaylist
+            return "Downloading playlist: " & name of targetPlaylist
+        end tell
+        '''
+    else:
+        # Download individual tracks by ID
+        ids = [tid.strip() for tid in track_ids.split(",") if tid.strip()]
+        if not ids:
+            return False, "Error: No valid track IDs provided"
+
+        # Build AppleScript to download each track
+        download_cmds = []
+        for track_id in ids:
+            safe_id = _escape_for_applescript(track_id)
+            download_cmds.append(f'download (first track of library playlist 1 whose persistent ID is "{safe_id}")')
+
+        script = f'''
+        tell application "Music"
+            {chr(10).join(f"            {cmd}" for cmd in download_cmds)}
+            return "Downloading {len(ids)} track(s)"
+        end tell
+        '''
+
+    success, output = run_applescript(script)
+    if output.startswith("ERROR:"):
+        return False, output[6:]
+    return success, output
+
+
 def play_playlist(playlist_name: str, shuffle: bool = False) -> tuple[bool, str]:
     """Start playing a playlist.
 

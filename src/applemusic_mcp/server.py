@@ -779,22 +779,23 @@ def get_playlist_tracks(
 
 
 @mcp.tool()
-def check_playlist(
-    search: str,
+def search_playlist(
+    query: str,
     playlist_id: str = "",
     playlist_name: str = "",
 ) -> str:
     """
-    Quick check if a song or artist is in a playlist.
+    Search for tracks in a playlist by name, artist, or album.
 
     Provide EITHER playlist_id (API) OR playlist_name (AppleScript, macOS only).
+    AppleScript uses native Music app search (fast). API manually filters tracks.
 
     Args:
-        search: Song name or artist to search for
+        query: Search term (matches name, artist, album, etc.)
         playlist_id: Playlist ID (from get_library_playlists)
-        playlist_name: Playlist name (macOS only, uses AppleScript)
+        playlist_name: Playlist name (macOS only, uses native AppleScript search)
 
-    Returns: Summary of matches or "No matches"
+    Returns: List of matching tracks or "No matches"
     """
     use_api = bool(playlist_id)
     use_applescript = bool(playlist_name)
@@ -804,32 +805,33 @@ def check_playlist(
     if not use_api and not use_applescript:
         return "Error: Provide playlist_id or playlist_name"
 
-    search_lower = search.lower()
     matches = []
 
     if use_applescript:
         if not APPLESCRIPT_AVAILABLE:
             return "Error: playlist_name requires macOS"
-        success, tracks = asc.get_playlist_tracks(playlist_name)
+        # Use native AppleScript search (fast, same as Music app search field)
+        success, result = asc.search_playlist(playlist_name, query)
         if not success:
-            return f"Error: {tracks}"
-        for t in tracks:
-            name = t.get("name", "")
-            artist = t.get("artist", "")
-            if search_lower in name.lower() or search_lower in artist.lower():
-                matches.append(f"{name} by {artist}")
+            return f"Error: {result}"
+        matches = [f"{t['name']} by {t['artist']}" for t in result]
     else:
+        # API path: manually filter tracks (cross-platform)
+        query_lower = query.lower()
         success, tracks = _get_playlist_track_names(playlist_id)
         if not success:
             return f"Error: {tracks}"
         for t in tracks:
             name = t.get("name", "")
             artist = t.get("artist", "")
-            if search_lower in name.lower() or search_lower in artist.lower():
+            album = t.get("album", "")
+            if (query_lower in name.lower() or
+                query_lower in artist.lower() or
+                query_lower in album.lower()):
                 matches.append(f"{name} by {artist}")
 
     if not matches:
-        return f"No matches for '{search}'"
+        return f"No matches for '{query}'"
 
     if len(matches) == 1:
         return f"Found: {matches[0]}"
@@ -3476,17 +3478,6 @@ if APPLESCRIPT_AVAILABLE:
             return "No tracks were removed"
 
         return "\n".join(output)
-
-    @mcp.tool()
-    def get_player_state() -> str:
-        """Get current player state (macOS only).
-
-        Returns: 'playing', 'paused', or 'stopped'
-        """
-        success, state = asc.get_player_state()
-        if success:
-            return f"Player state: {state}"
-        return f"Error: {state}"
 
     @mcp.tool()
     def delete_playlist(playlist_name: str) -> str:

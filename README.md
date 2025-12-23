@@ -127,7 +127,7 @@ Ask Claude things like:
 | `copy_playlist` | Copy playlist to editable version (by ID or name) | API or AS | All (by-name: macOS) |
 | `remove_from_playlist` | Remove track(s): single, array, or by ID | AppleScript | macOS |
 | `delete_playlist` | Delete playlist | AppleScript | macOS |
-| `check_playlist` | Quick check if song/artist in playlist | API or AS | All |
+| `search_playlist` | Search playlist tracks (native AS search, fast) | API or AS | All |
 
 `add_to_playlist` accepts catalog IDs (auto-adds to library first) or library IDs. With `auto_search=True`, tracks not in your library are automatically found in the Apple Music catalog, added to your library, then added to the playlist—all in one call. Duplicate checking is on by default. By-name mode uses AppleScript and supports partial matching (e.g., "Give Up the Funk" finds "Give up the Funk (Tear the Roof Off the Sucker)").
 
